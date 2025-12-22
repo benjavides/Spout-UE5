@@ -3,6 +3,7 @@
  * CPU memory, and updating UE transient textures via the render thread.
  */
 #include "SpoutReceiver.h"
+#include "Materials/MaterialInterface.h"
 #include "SpoutD3DContext.h"
 #include "SpoutSenderRegistry.h"
 #include "SpoutTextureUtils.h"
@@ -120,7 +121,7 @@ namespace
 	}
 }
 
-bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInstanceDynamic*& OutMat, UTexture2D*& OutTexture, UTextureRenderTarget2D* OptionalOutputRenderTarget)
+bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMaterial, FName TextureParameterName, UMaterialInstanceDynamic*& OutMat, UTexture2D*& OutTexture, UTextureRenderTarget2D* OptionalOutputRenderTarget)
 {
 	// OptionalOutputRenderTarget is currently unused; kept for future GPU paths.
 	static_cast<void>(OptionalOutputRenderTarget);
@@ -157,27 +158,16 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInstanceDynamic*& O
 	// Create/resize the transient texture that UE will sample in materials.
 	SpoutTextureUtils::EnsureTransientTexture(OutTexture, static_cast<int32>(W), static_cast<int32>(H), PF_B8G8R8A8);
 
-	if (!OutMat)
+	const FName ParamName = TextureParameterName.IsNone() ? FName("SpoutTexture") : TextureParameterName;
+
+	if (!OutMat && InputMaterial)
 	{
-		// NOTE: Hard-coded material path assumes project content is staged accordingly.
-		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/SpoutPlugin/Content/Materials/SpoutMaterial.SpoutMaterial"));
-		if (!BaseMat)
-		{
-			BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Content/Materials/SpoutMaterial.SpoutMaterial"));
-		}
-		if (!BaseMat)
-		{
-			BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/DGS/SpoutMaterial.SpoutMaterial"));
-		}
-		if (BaseMat)
-		{
-			OutMat = UMaterialInstanceDynamic::Create(BaseMat, nullptr);
-		}
+		OutMat = UMaterialInstanceDynamic::Create(InputMaterial, nullptr);
 	}
 
 	if (OutMat)
 	{
-		OutMat->SetTextureParameterValue(FName("SpoutTexture"), OutTexture);
+		OutMat->SetTextureParameterValue(ParamName, OutTexture);
 	}
 
 	TRefCountPtr<FRHITexture> CapturedTextureRHI;

@@ -59,13 +59,15 @@ void USpoutBPFunctionLibrary::CloseSender(FName SpoutName)
 
 bool USpoutBPFunctionLibrary::SpoutReceiver(
 	const FName SpoutName,
+	UMaterialInterface* InputMaterial,
+	FName TextureParameterName,
 	UMaterialInstanceDynamic*& OutMat,
 	UTexture2D*& OutTexture,
 	UTextureRenderTarget2D* OptionalOutputRenderTarget
 )
 {
 	// OptionalOutputRenderTarget is reserved for future GPU-side copy paths.
-	return FSpoutReceiver::Receive(SpoutName, OutMat, OutTexture, OptionalOutputRenderTarget);
+	return FSpoutReceiver::Receive(SpoutName, InputMaterial, TextureParameterName, OutMat, OutTexture, OptionalOutputRenderTarget);
 }
 
 bool USpoutBPFunctionLibrary::SpoutInfo(TArray<FSenderStruct>& Senders)

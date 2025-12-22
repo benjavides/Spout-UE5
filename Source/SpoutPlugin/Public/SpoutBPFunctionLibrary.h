@@ -8,6 +8,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "SpoutBPFunctionLibrary.generated.h"
 
 UENUM(BlueprintType)
@@ -121,8 +122,10 @@ public:
 
 	// --- Receivers ---
 
-	UFUNCTION(BlueprintCallable, Category = "Spout", meta = (AdvancedDisplay = "3"))
+	UFUNCTION(BlueprintCallable, Category = "Spout", meta = (AdvancedDisplay = "5"))
 	static bool SpoutReceiver(const FName SpoutName,
+							  UMaterialInterface* InputMaterial,
+							  FName TextureParameterName,
 							  UMaterialInstanceDynamic*& OutMat,
 							  UTexture2D*& OutTexture,
 							  UTextureRenderTarget2D* OptionalOutputRenderTarget = nullptr);

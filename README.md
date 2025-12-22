@@ -119,10 +119,31 @@ Once the Capture Source is set correctly, the `Texture Target` of the `SceneCapt
   - Optional `UTextureRenderTarget2D` – the receiver will copy the stream into it.
 - Always validate `OutMat` before using it, as the sender may not be available or may reconnect.
 
+#### Render Target Notes
+
+If you choose to output the received Spout stream into a `UTextureRenderTarget2D`, the recommended and most reliable format is:
+
+- **RTF RGBA8 sRGB**
+
+Other formats may either not work correctly or result in poor visual quality.  
+Support for additional formats is still under investigation, and users are encouraged to test and choose what best fits their use case.
+
+#### Material Output Notes
+
+If you want to use a **Material** as the output for the Spout Receiver:
+
+- You can provide **any material** as input to the Receiver.
+- Inside that material, add a **Texture Parameter**.
+- The name of this Texture Parameter **must exactly match** the parameter name specified in the Spout Receiver node.
+- The Receiver will automatically bind the incoming Spout texture to that parameter at runtime.
+
+If you do not wish to use a material, this step can be safely skipped and the raw texture or render target output can be used instead.
+
 **Notes**
 - The receiver automatically reconnects when the sender becomes available.
 - The assigned material must be compatible with Spout input.
 - Avoid heavy logic on Tick; use a timer if possible.
+
 
 
 
@@ -137,8 +158,9 @@ This plugin ships with sample content under `Content/` when `CanContainContent` 
 - At the moment, only a **limited set of texture formats** is supported.  
   Support for additional formats is still a work in progress.
 
-- For now, the **recommended and most reliable format** for Render Targets is:  
+- For now, the **recommended and most reliable format** for Render Targets are (tested):  
   **RTF RGBA8 sRGB**
+  **RTF RGB10A2**
 
 - The Spout Receiver currently performs a **CPU readback** each frame before updating Unreal textures.  
   This can become expensive with large resolutions or high update rates and should be considered when targeting real-time performance.
