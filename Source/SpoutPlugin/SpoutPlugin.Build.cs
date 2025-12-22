@@ -75,6 +75,7 @@ public class SpoutPlugin : ModuleRules
             string PlatformString = "amd64";
             // Link against the Spout import library and stage the DLL.
             PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyPath, "Spout", "lib", PlatformString, "Spout.lib"));
+            PublicSystemLibraries.Add("d3dcompiler.lib");
             
             string pluginDLLPath = Path.Combine(ThirdPartyPath, "Spout", "lib", PlatformString, "Spout.dll");
             string binariesPath = CopyToProjectBinaries(pluginDLLPath, Target);

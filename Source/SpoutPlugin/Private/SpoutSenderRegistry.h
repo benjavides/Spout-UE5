@@ -37,6 +37,9 @@ public:
 
 	// CPU-readable staging texture for receiver readback.
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> StagingTexture;
+	// Optional intermediate texture for sender-side gamma correction.
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> GammaTexture;
+	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> GammaRTV;
 
 	// Cached D3D11 wrapper for a D3D12 resource (sender path).
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> CachedWrappedResource;

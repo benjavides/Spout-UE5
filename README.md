@@ -84,10 +84,28 @@ The bundled `Spout.dll` will be staged automatically into your project’s `Bina
 - When using `TextureRenderTarget2D`, ensure the render target asset is valid and updated.
 - The sender automatically creates and updates the Spout stream while it is being called.
 
+#### SceneCapture2D and Render Target Notes
+
+When using a `TextureRenderTarget2D` as the source for the Sender, a common setup is to drive it using a `SceneCapture2D`, as shown in the example Blueprints included with the plugin.
+
+In this case, the `SceneCapture2D` **Capture Source** must be set to:
+
+- **`FinalColor (LDR)`**
+
+and **not** to `SceneColor (HDR) in RGB`.
+
+If `SceneColor (HDR)` is used, the texture sent through Spout may appear **black** on the receiving application.
+
+At the moment, this limitation is still under investigation. A proper fix or improvement will be added in a future update if possible.  
+If you have suggestions or insights on how to handle this correctly, contributions and advice are very welcome.
+
+Once the Capture Source is set correctly, the `Texture Target` of the `SceneCapture2D` can be safely used as the input Render Target for the Spout Sender.
+
 **Notes**
 - Only one sender can own a given Spout Name at a time.
 - The sender must be called continuously to keep the stream alive.
 - This workflow is Windows-only and relies on DX11-on-DX12 GPU interop.
+
 
 ---
 

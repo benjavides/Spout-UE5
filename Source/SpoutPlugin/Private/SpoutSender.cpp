@@ -9,18 +9,48 @@
 #include "SpoutModule.h"
 
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "RHI.h"
+#include "RHICommandList.h"
 #include "RHIResources.h"
 #include "RenderResource.h"
 #include "RenderingThread.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Rendering/SlateRenderer.h"
+#include "Widgets/SWindow.h"
+
+#include <cstring>
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <d3dcompiler.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 using Microsoft::WRL::ComPtr;
 
 namespace
 {
+	DXGI_FORMAT SanitizeDxgiFormat(DXGI_FORMAT InFormat)
+	{
+		switch (InFormat)
+		{
+		case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+			return DXGI_FORMAT_R8G8B8A8_UNORM;
+		case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+			return DXGI_FORMAT_B8G8R8A8_UNORM;
+		case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+			return DXGI_FORMAT_R10G10B10A2_UNORM;
+		case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+			return DXGI_FORMAT_R16G16B16A16_FLOAT;
+		default:
+			return InFormat;
+		}
+	}
+
 	struct FSpoutSendSource
 	{
-		// RHI texture to read from (viewport backbuffer or render target).
+		// RHI texture to read from (render target path).
 		FTextureRHIRef SourceRHI;
 		// Render target resource when sending from a UTextureRenderTarget2D.
 		FTextureRenderTargetResource* RenderTargetResource = nullptr;
@@ -49,21 +79,553 @@ namespace
 			return true;
 		}
 
-		if (SendTextureFrom == ESpoutSendTextureFrom::GameViewport)
-		{
-			// Only valid when a game viewport exists (e.g., not in commandlets).
-			if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
-			{
-				OutSource.SourceRHI = GEngine->GameViewport->Viewport->GetRenderTargetTexture();
-			}
-
-			OutSource.bIsViewport = true;
-			OutSource.bUseRenderTarget = false;
-			return OutSource.SourceRHI.IsValid();
-		}
-
 		return false;
 	}
+
+	void EnsureSharedSenderTexture(FSpoutSharedSender& Sender, uint32 Width, uint32 Height, DXGI_FORMAT Format, FSpoutD3DContext& Context);
+	ComPtr<ID3D11Texture2D> GetWrappedResource(FSpoutSharedSender& Sender, ID3D12Resource* NativeResource);
+
+	struct FSpoutGammaConstants
+	{
+		float Gamma = 1.0f;
+		float Padding[3] = {};
+	};
+
+	class FSpoutGammaPipeline
+	{
+	public:
+		static FSpoutGammaPipeline& Get()
+		{
+			static FSpoutGammaPipeline Instance;
+			return Instance;
+		}
+
+		bool Initialize(ID3D11Device* InDevice)
+		{
+			if (bInitialized && InDevice == CachedDevice)
+			{
+				return true;
+			}
+
+			CachedDevice = InDevice;
+			VertexShader.Reset();
+			PixelShader.Reset();
+			SamplerState.Reset();
+			GammaBuffer.Reset();
+			bInitialized = false;
+
+			if (!InDevice)
+			{
+				return false;
+			}
+
+			static const char* ShaderSource = R"(
+cbuffer GammaCB : register(b0)
+{
+	float Gamma;
+	float3 Padding;
+};
+
+Texture2D InputTex : register(t0);
+SamplerState InputSampler : register(s0);
+
+struct VSOut
+{
+	float4 Pos : SV_Position;
+	float2 UV : TEXCOORD0;
+};
+
+VSOut VSMain(uint id : SV_VertexID)
+{
+	VSOut o;
+	float2 pos = float2((id == 2) ? 3.0f : -1.0f, (id == 1) ? -3.0f : 1.0f);
+	o.Pos = float4(pos, 0.0f, 1.0f);
+	o.UV = float2((pos.x + 1.0f) * 0.5f, 1.0f - (pos.y + 1.0f) * 0.5f);
+	return o;
+}
+
+float4 PSMain(VSOut i) : SV_Target
+{
+	float4 c = InputTex.Sample(InputSampler, i.UV);
+	c.rgb = pow(saturate(c.rgb), Gamma);
+	return c;
+}
+)";
+
+			UINT CompileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if UE_BUILD_DEBUG
+			CompileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+			ComPtr<ID3DBlob> VSBlob;
+			ComPtr<ID3DBlob> PSBlob;
+			ComPtr<ID3DBlob> ErrorBlob;
+
+			HRESULT hr = D3DCompile(
+				ShaderSource,
+				strlen(ShaderSource),
+				nullptr,
+				nullptr,
+				nullptr,
+				"VSMain",
+				"vs_5_0",
+				CompileFlags,
+				0,
+				VSBlob.GetAddressOf(),
+				ErrorBlob.GetAddressOf()
+			);
+
+			if (FAILED(hr) || !VSBlob)
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to compile Spout gamma VS (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			ErrorBlob.Reset();
+			hr = D3DCompile(
+				ShaderSource,
+				strlen(ShaderSource),
+				nullptr,
+				nullptr,
+				nullptr,
+				"PSMain",
+				"ps_5_0",
+				CompileFlags,
+				0,
+				PSBlob.GetAddressOf(),
+				ErrorBlob.GetAddressOf()
+			);
+
+			if (FAILED(hr) || !PSBlob)
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to compile Spout gamma PS (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			hr = InDevice->CreateVertexShader(VSBlob->GetBufferPointer(), VSBlob->GetBufferSize(), nullptr, VertexShader.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma VS (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			hr = InDevice->CreatePixelShader(PSBlob->GetBufferPointer(), PSBlob->GetBufferSize(), nullptr, PixelShader.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma PS (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			D3D11_SAMPLER_DESC SamplerDesc = {};
+			SamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			SamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			SamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			SamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			SamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+			hr = InDevice->CreateSamplerState(&SamplerDesc, SamplerState.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma sampler (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			D3D11_BUFFER_DESC BufferDesc = {};
+			BufferDesc.ByteWidth = sizeof(FSpoutGammaConstants);
+			BufferDesc.Usage = D3D11_USAGE_DEFAULT;
+			BufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			BufferDesc.CPUAccessFlags = 0;
+			hr = InDevice->CreateBuffer(&BufferDesc, nullptr, GammaBuffer.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma constant buffer (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			bInitialized = true;
+			return true;
+		}
+
+		bool Apply(
+			ID3D11DeviceContext* ImmediateContext,
+			ID3D11ShaderResourceView* InputSRV,
+			ID3D11RenderTargetView* OutputRTV,
+			float Gamma,
+			uint32 Width,
+			uint32 Height)
+		{
+			if (!bInitialized || !ImmediateContext || !InputSRV || !OutputRTV)
+			{
+				return false;
+			}
+
+			const FSpoutGammaConstants Constants = { Gamma, {0.0f, 0.0f, 0.0f} };
+			ImmediateContext->UpdateSubresource(GammaBuffer.Get(), 0, nullptr, &Constants, 0, 0);
+
+			D3D11_VIEWPORT Viewport = {};
+			Viewport.TopLeftX = 0.0f;
+			Viewport.TopLeftY = 0.0f;
+			Viewport.Width = static_cast<float>(Width);
+			Viewport.Height = static_cast<float>(Height);
+			Viewport.MinDepth = 0.0f;
+			Viewport.MaxDepth = 1.0f;
+			ImmediateContext->RSSetViewports(1, &Viewport);
+
+			ID3D11RenderTargetView* RenderTargets[1] = { OutputRTV };
+			ImmediateContext->OMSetRenderTargets(1, RenderTargets, nullptr);
+			ImmediateContext->IASetInputLayout(nullptr);
+			ImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			ImmediateContext->VSSetShader(VertexShader.Get(), nullptr, 0);
+			ImmediateContext->PSSetShader(PixelShader.Get(), nullptr, 0);
+
+			ID3D11Buffer* ConstantBuffers[1] = { GammaBuffer.Get() };
+			ImmediateContext->PSSetConstantBuffers(0, 1, ConstantBuffers);
+
+			ID3D11SamplerState* Samplers[1] = { SamplerState.Get() };
+			ImmediateContext->PSSetSamplers(0, 1, Samplers);
+
+			ID3D11ShaderResourceView* SRVs[1] = { InputSRV };
+			ImmediateContext->PSSetShaderResources(0, 1, SRVs);
+
+			ImmediateContext->Draw(3, 0);
+
+			ID3D11ShaderResourceView* NullSRVs[1] = { nullptr };
+			ImmediateContext->PSSetShaderResources(0, 1, NullSRVs);
+
+			ID3D11RenderTargetView* NullRTVs[1] = { nullptr };
+			ImmediateContext->OMSetRenderTargets(1, NullRTVs, nullptr);
+
+			return true;
+		}
+
+	private:
+		ID3D11Device* CachedDevice = nullptr;
+		bool bInitialized = false;
+		ComPtr<ID3D11VertexShader> VertexShader;
+		ComPtr<ID3D11PixelShader> PixelShader;
+		ComPtr<ID3D11SamplerState> SamplerState;
+		ComPtr<ID3D11Buffer> GammaBuffer;
+	};
+
+	float SanitizeGamma(float Gamma)
+	{
+		if (Gamma <= 0.0f)
+		{
+			return 1.0f;
+		}
+
+		return FMath::Clamp(Gamma, 0.01f, 10.0f);
+	}
+
+	bool EnsureGammaResources(FSpoutSharedSender& Sender, uint32 Width, uint32 Height, DXGI_FORMAT Format, FSpoutD3DContext& Context, ComPtr<ID3D11Texture2D>& OutTexture, ComPtr<ID3D11RenderTargetView>& OutRTV)
+	{
+		FScopeLock SenderLock(&Sender.ResourceMutex);
+		bool bNeedsCreate = false;
+
+		if (!Sender.GammaTexture || !Sender.GammaRTV)
+		{
+			bNeedsCreate = true;
+		}
+		else
+		{
+			D3D11_TEXTURE2D_DESC Desc;
+			Sender.GammaTexture->GetDesc(&Desc);
+			if (Desc.Width != Width || Desc.Height != Height || Desc.Format != Format)
+			{
+				bNeedsCreate = true;
+			}
+		}
+
+		if (bNeedsCreate)
+		{
+			Sender.GammaTexture.Reset();
+			Sender.GammaRTV.Reset();
+
+			spoutDirectX* SpoutDX = Context.GetSpoutDirectX();
+			ID3D11Device* Device = Context.GetD3D11Device();
+			if (!SpoutDX || !Device)
+			{
+				return false;
+			}
+
+			ComPtr<ID3D11Texture2D> NewTexture;
+			const bool bCreated = SpoutDX->CreateDX11Texture(
+				Device,
+				Width,
+				Height,
+				Format,
+				D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+				0,
+				NewTexture.GetAddressOf());
+
+			if (!bCreated || !NewTexture)
+			{
+				return false;
+			}
+
+			ComPtr<ID3D11RenderTargetView> NewRTV;
+			HRESULT hr = Device->CreateRenderTargetView(NewTexture.Get(), nullptr, NewRTV.GetAddressOf());
+			if (FAILED(hr))
+			{
+				return false;
+			}
+
+			Sender.GammaTexture = MoveTemp(NewTexture);
+			Sender.GammaRTV = MoveTemp(NewRTV);
+		}
+
+		OutTexture = Sender.GammaTexture;
+		OutRTV = Sender.GammaRTV;
+		return OutTexture && OutRTV;
+	}
+
+	bool ApplyGammaCopy(FSpoutSharedSender& Sender, const ComPtr<ID3D11Texture2D>& SharedTexture, const ComPtr<ID3D11Texture2D>& WrappedResource, uint32 Width, uint32 Height, DXGI_FORMAT Format, float Gamma, FSpoutD3DContext& Context)
+	{
+		ID3D11Device* Device = Context.GetD3D11Device();
+		ID3D11DeviceContext* ImmediateContext = Context.GetImmediateContext();
+		if (!Device || !ImmediateContext)
+		{
+			return false;
+		}
+
+		ComPtr<ID3D11Texture2D> GammaTexture;
+		ComPtr<ID3D11RenderTargetView> GammaRTV;
+		if (!EnsureGammaResources(Sender, Width, Height, Format, Context, GammaTexture, GammaRTV))
+		{
+			return false;
+		}
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+		SRVDesc.Format = Format;
+		SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		SRVDesc.Texture2D.MostDetailedMip = 0;
+		SRVDesc.Texture2D.MipLevels = 1;
+
+		ComPtr<ID3D11ShaderResourceView> WrappedSRV;
+		HRESULT hr = Device->CreateShaderResourceView(WrappedResource.Get(), &SRVDesc, WrappedSRV.GetAddressOf());
+		if (FAILED(hr))
+		{
+			return false;
+		}
+
+		FSpoutGammaPipeline& Pipeline = FSpoutGammaPipeline::Get();
+		if (!Pipeline.Initialize(Device))
+		{
+			return false;
+		}
+
+		if (!Pipeline.Apply(ImmediateContext, WrappedSRV.Get(), GammaRTV.Get(), Gamma, Width, Height))
+		{
+			return false;
+		}
+
+		ImmediateContext->CopyResource(SharedTexture.Get(), GammaTexture.Get());
+		ImmediateContext->Flush();
+		return true;
+	}
+
+	void SendTextureOnRenderThread(const FName SpoutName, const FTextureRHIRef& SourceRHI, bool bIsViewport, float Gamma, FRHICommandListImmediate& RHICmdList)
+	{
+		if (!SourceRHI.IsValid())
+		{
+			return;
+		}
+
+		FSpoutD3DContext& Context = FSpoutD3DContext::Get();
+		if (!Context.IsSpoutAvailable())
+		{
+			return;
+		}
+
+		// D3D11 immediate context is not thread-safe; guard its usage.
+		FScopeLock D3DLock(&Context.GetD3D11ContextMutex());
+		if (!Context.GetImmediateContext() || !Context.GetD3D11On12Device())
+		{
+			return;
+		}
+
+		// UE D3D12 textures expose their native resource for interop.
+		ID3D12Resource* NativeRes = static_cast<ID3D12Resource*>(SourceRHI->GetNativeResource());
+		if (!NativeRes)
+		{
+			return;
+		}
+
+		// Transition for copy and flush so the wrapped D3D11 context can see up-to-date data.
+		RHICmdList.Transition(FRHITransitionInfo(SourceRHI, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+		RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThreadFlushResources);
+
+		D3D12_RESOURCE_DESC Desc = NativeRes->GetDesc();
+
+		DXGI_FORMAT Format = SanitizeDxgiFormat(Desc.Format);
+		if (Format == DXGI_FORMAT_UNKNOWN)
+		{
+			// Fall back to a common format if the backbuffer format cannot be used.
+			Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+		}
+		TSharedPtr<FSpoutSharedSender> Sender = FSpoutSenderRegistry::Get().FindOrAdd(SpoutName, ESpoutType::Sender);
+		if (!Sender)
+		{
+			return;
+		}
+
+		EnsureSharedSenderTexture(*Sender, static_cast<uint32>(Desc.Width), static_cast<uint32>(Desc.Height), Format, Context);
+
+		ComPtr<ID3D11Texture2D> SharedTexture;
+		{
+			FScopeLock SenderLock(&Sender->ResourceMutex);
+			SharedTexture = Sender->SharedTexture;
+		}
+
+		ComPtr<ID3D11Texture2D> WrappedResource = SharedTexture ? GetWrappedResource(*Sender, NativeRes) : nullptr;
+		if (SharedTexture && WrappedResource)
+		{
+			// Acquire transitions the wrapped resource for D3D11 access.
+			FScopedD3D11On12Acquire Acquire(WrappedResource.Get());
+			if (Acquire.IsValid())
+			{
+				const float SafeGamma = SanitizeGamma(Gamma);
+				const bool bApplyGamma = !FMath::IsNearlyEqual(SafeGamma, 1.0f, 0.001f);
+
+				if (bApplyGamma && ApplyGammaCopy(*Sender, SharedTexture, WrappedResource, static_cast<uint32>(Desc.Width), static_cast<uint32>(Desc.Height), Format, SafeGamma, Context))
+				{
+					// Gamma-corrected copy performed in ApplyGammaCopy.
+				}
+				else
+				{
+					// Copy UE's D3D12 texture into the shared DX11 texture.
+					Context.GetImmediateContext()->CopyResource(SharedTexture.Get(), WrappedResource.Get());
+					Context.GetImmediateContext()->Flush();
+				}
+			}
+		}
+
+		// Restore the source access state after the copy.
+		RHICmdList.Transition(FRHITransitionInfo(
+			SourceRHI,
+			ERHIAccess::CopySrc,
+			bIsViewport ? ERHIAccess::Present : ERHIAccess::SRVGraphics
+		));
+	}
+
+	class FSpoutViewportSender
+	{
+	public:
+		static FSpoutViewportSender& Get()
+		{
+			static FSpoutViewportSender Instance;
+			return Instance;
+		}
+
+		bool QueueSend(const FName& SpoutName, float Gamma)
+		{
+			if (SpoutName.IsNone())
+			{
+				return false;
+			}
+
+			if (!RegisterIfNeeded())
+			{
+				return false;
+			}
+
+			FScopeLock Lock(&PendingMutex);
+			PendingGammas.FindOrAdd(SpoutName) = Gamma;
+			return true;
+		}
+
+		void Shutdown()
+		{
+			if (bRegistered && FSlateApplication::IsInitialized())
+			{
+				if (FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer())
+				{
+					Renderer->OnBackBufferReadyToPresent().Remove(BackBufferHandle);
+				}
+			}
+
+			bRegistered = false;
+			BackBufferHandle.Reset();
+
+			FScopeLock Lock(&PendingMutex);
+			PendingGammas.Reset();
+		}
+
+	private:
+		bool RegisterIfNeeded()
+		{
+			if (bRegistered)
+			{
+				return true;
+			}
+
+			if (!GEngine || !GEngine->GameViewport)
+			{
+				return false;
+			}
+
+			if (!FSlateApplication::IsInitialized())
+			{
+				return false;
+			}
+
+			FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+			if (!Renderer)
+			{
+				return false;
+			}
+
+			TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+			if (!Window.IsValid())
+			{
+				return false;
+			}
+
+			TargetWindow = Window;
+			BackBufferHandle = Renderer->OnBackBufferReadyToPresent().AddLambda(
+				[this](SWindow& SlateWindow, const FTexture2DRHIRef& BackBuffer)
+				{
+					if (!BackBuffer.IsValid())
+					{
+						return;
+					}
+
+					// Always re-evaluate the current viewport window to handle PIE/editor window switches.
+					TSharedPtr<SWindow> ViewportWindow = (GEngine && GEngine->GameViewport) ? GEngine->GameViewport->GetWindow() : nullptr;
+					if (!ViewportWindow.IsValid() || ViewportWindow.Get() != &SlateWindow)
+					{
+						return;
+					}
+
+					TMap<FName, float> NamesToSend;
+					{
+						FScopeLock Lock(&PendingMutex);
+						NamesToSend = MoveTemp(PendingGammas);
+						PendingGammas.Reset();
+					}
+
+					if (NamesToSend.Num() == 0)
+					{
+						return;
+					}
+
+					FRHICommandListImmediate& RHICmdList = FRHICommandListExecutor::GetImmediateCommandList();
+					for (const TPair<FName, float>& Pair : NamesToSend)
+					{
+						SendTextureOnRenderThread(Pair.Key, BackBuffer, true, Pair.Value, RHICmdList);
+					}
+				});
+
+			bRegistered = BackBufferHandle.IsValid();
+			return bRegistered;
+		}
+
+		FCriticalSection PendingMutex;
+		TMap<FName, float> PendingGammas;
+		TWeakPtr<SWindow> TargetWindow;
+		FDelegateHandle BackBufferHandle;
+		bool bRegistered = false;
+	};
 
 	void EnsureSharedSenderTexture(FSpoutSharedSender& Sender, uint32 Width, uint32 Height, DXGI_FORMAT Format, FSpoutD3DContext& Context)
 	{
@@ -78,6 +640,8 @@ namespace
 		Sender.SharedHandle = nullptr;
 		Sender.CachedWrappedResource.Reset();
 		Sender.CachedNativeResource = nullptr;
+		Sender.GammaTexture.Reset();
+		Sender.GammaRTV.Reset();
 		Sender.Width = Width;
 		Sender.Height = Height;
 
@@ -142,7 +706,7 @@ namespace
 	}
 }
 
-bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D)
+bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D, float Gamma)
 {
 	FSpoutD3DContext& Context = FSpoutD3DContext::Get();
 	Context.InitializeIfNeeded();
@@ -150,6 +714,17 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 	if (!Context.IsSpoutAvailable())
 	{
 		return false;
+	}
+
+	if (SendTextureFrom == ESpoutSendTextureFrom::GameViewport)
+	{
+		if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport)
+		{
+			return false;
+		}
+
+		// Queue the request; capture happens when the backbuffer is ready to present.
+		return FSpoutViewportSender::Get().QueueSend(SpoutName, Gamma);
 	}
 
 	FSpoutSendSource SendSource;
@@ -160,17 +735,8 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 
 	// The copy must run on the render thread to safely touch RHI resources.
 	ENQUEUE_RENDER_COMMAND(SpoutSenderCmd)(
-		[SpoutName, SendSource](FRHICommandListImmediate& RHICmdList)
+		[SpoutName, SendSource, Gamma](FRHICommandListImmediate& RHICmdList)
 		{
-			FSpoutD3DContext& Context = FSpoutD3DContext::Get();
-
-			// D3D11 immediate context is not thread-safe; guard its usage.
-			FScopeLock D3DLock(&Context.GetD3D11ContextMutex());
-			if (!Context.GetImmediateContext() || !Context.GetD3D11On12Device())
-			{
-				return;
-			}
-
 			FTextureRHIRef LocalSourceRHI = SendSource.SourceRHI;
 			if (SendSource.bUseRenderTarget)
 			{
@@ -186,54 +752,7 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 				return;
 			}
 
-			// UE D3D12 textures expose their native resource for interop.
-			ID3D12Resource* NativeRes = static_cast<ID3D12Resource*>(LocalSourceRHI->GetNativeResource());
-			if (!NativeRes)
-			{
-				return;
-			}
-
-			// Transition for copy and flush so the wrapped D3D11 context can see up-to-date data.
-			RHICmdList.Transition(FRHITransitionInfo(LocalSourceRHI, ERHIAccess::Unknown, ERHIAccess::CopySrc));
-			RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThreadFlushResources);
-
-			D3D12_RESOURCE_DESC Desc = NativeRes->GetDesc();
-
-			// Spout DX11 path expects BGRA8 shared textures.
-			const DXGI_FORMAT Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-			TSharedPtr<FSpoutSharedSender> Sender = FSpoutSenderRegistry::Get().FindOrAdd(SpoutName, ESpoutType::Sender);
-			if (!Sender)
-			{
-				return;
-			}
-
-			EnsureSharedSenderTexture(*Sender, static_cast<uint32>(Desc.Width), static_cast<uint32>(Desc.Height), Format, Context);
-
-			ComPtr<ID3D11Texture2D> SharedTexture;
-			{
-				FScopeLock SenderLock(&Sender->ResourceMutex);
-				SharedTexture = Sender->SharedTexture;
-			}
-
-			ComPtr<ID3D11Texture2D> WrappedResource = SharedTexture ? GetWrappedResource(*Sender, NativeRes) : nullptr;
-			if (SharedTexture && WrappedResource)
-			{
-				// Acquire transitions the wrapped resource for D3D11 access.
-				FScopedD3D11On12Acquire Acquire(WrappedResource.Get());
-				if (Acquire.IsValid())
-				{
-					// Copy UE's D3D12 texture into the shared DX11 texture.
-					Context.GetImmediateContext()->CopyResource(SharedTexture.Get(), WrappedResource.Get());
-					Context.GetImmediateContext()->Flush();
-				}
-			}
-
-			// Restore the source access state after the copy.
-			RHICmdList.Transition(FRHITransitionInfo(
-				LocalSourceRHI,
-				ERHIAccess::CopySrc,
-				SendSource.bIsViewport ? ERHIAccess::Present : ERHIAccess::SRVGraphics
-			));
+			SendTextureOnRenderThread(SpoutName, LocalSourceRHI, SendSource.bIsViewport, Gamma, RHICmdList);
 		});
 
 	return true;
@@ -246,4 +765,9 @@ void FSpoutSender::Close(FName SpoutName)
 		FSpoutSenderRegistry::Get().Remove(SpoutName);
 		UE_LOG(LogSpoutPlugin, Log, TEXT("Closed Spout Sender: %s"), *SpoutName.ToString());
 	}
+}
+
+void FSpoutSender::Shutdown()
+{
+	FSpoutViewportSender::Get().Shutdown();
 }

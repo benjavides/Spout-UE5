@@ -24,6 +24,7 @@ void USpoutBPFunctionLibrary::GlobalShutdown()
 {
 	// Render-thread work may still reference shared D3D objects; drain before releasing.
 	FlushRenderingCommands();
+	FSpoutSender::Shutdown();
 	FSpoutSenderRegistry::Get().Clear();
 	FSpoutD3DContext::Get().Shutdown();
 }
@@ -46,9 +47,9 @@ UTextureRenderTarget2D* USpoutBPFunctionLibrary::CreateTextureRenderTarget2D(int
 	return SpoutTextureUtils::CreateRenderTarget2D(Width, Height, Format, bForceLinearGamma);
 }
 
-bool USpoutBPFunctionLibrary::SpoutSender(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D)
+bool USpoutBPFunctionLibrary::SpoutSender(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D, float Gamma)
 {
-	return FSpoutSender::Send(SpoutName, SendTextureFrom, TextureRenderTarget2D);
+	return FSpoutSender::Send(SpoutName, SendTextureFrom, TextureRenderTarget2D, Gamma);
 }
 
 void USpoutBPFunctionLibrary::CloseSender(FName SpoutName)
