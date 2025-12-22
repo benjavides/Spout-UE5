@@ -18,6 +18,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/SlateRenderer.h"
 #include "Widgets/SWindow.h"
+#include "Engine/TextureRenderTarget2D.h"
 
 #include <cstring>
 

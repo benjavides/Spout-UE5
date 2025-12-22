@@ -67,7 +67,7 @@ public class SpoutPlugin : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Slate", "SlateCore"
+            "ApplicationCore", "Slate", "SlateCore"
         });
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
