@@ -1,0 +1,12 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.SpoutPlugin.cpp.obj": [
+			"SpoutBPFunctionLibrary.gen.cpp.obj",
+			"SpoutPlugin.init.gen.cpp.obj",
+			"PerModuleInline.gen.cpp.obj",
+			"SpoutBPFunctionLibrary.cpp.obj",
+			"SpoutModule.cpp.obj"
+		]
+	}
+}
