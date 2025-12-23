@@ -4,6 +4,7 @@
  */
 #include "SpoutTextureUtils.h"
 
+#include "TextureResource.h"
 #include "RenderResource.h"
 
 namespace SpoutTextureUtils
@@ -24,7 +25,11 @@ namespace SpoutTextureUtils
 		// Ensure the render resource is released before GC.
 		if (Texture->GetResource())
 		{
-			BeginReleaseResource(Texture->GetResource());
+			FTextureResource* Resource = Texture->GetResource();
+			if (Resource)
+			{
+				BeginReleaseResource(static_cast<FRenderResource*>(Resource));
+			}
 		}
 
 		Texture->MarkAsGarbage();

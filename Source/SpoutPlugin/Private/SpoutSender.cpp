@@ -19,6 +19,10 @@
 #include "Rendering/SlateRenderer.h"
 #include "Widgets/SWindow.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture.h"
+#include "TextureResource.h"
+#include "RenderResource.h"
+#include "Engine/TextureRenderTarget.h"
 
 #include <cstring>
 
@@ -583,16 +587,21 @@ float4 PSMain(VSOut i) : SV_Target
 			}
 
 			TargetWindow = Window;
-			BackBufferHandle = Renderer->OnBackBufferReadyToPresent().AddLambda(
-				[this](SWindow& SlateWindow, const FTexture2DRHIRef& BackBuffer)
+
+			BackBufferHandle =
+			Renderer->OnBackBufferReadyToPresent().AddLambda(
+				[this](SWindow& SlateWindow, const FTextureRHIRef& BackBuffer)
 				{
 					if (!BackBuffer.IsValid())
 					{
 						return;
 					}
 
-					// Always re-evaluate the current viewport window to handle PIE/editor window switches.
-					TSharedPtr<SWindow> ViewportWindow = (GEngine && GEngine->GameViewport) ? GEngine->GameViewport->GetWindow() : nullptr;
+					TSharedPtr<SWindow> ViewportWindow =
+						(GEngine && GEngine->GameViewport)
+						? GEngine->GameViewport->GetWindow()
+						: nullptr;
+
 					if (!ViewportWindow.IsValid() || ViewportWindow.Get() != &SlateWindow)
 					{
 						return;
@@ -610,12 +619,25 @@ float4 PSMain(VSOut i) : SV_Target
 						return;
 					}
 
-					FRHICommandListImmediate& RHICmdList = FRHICommandListExecutor::GetImmediateCommandList();
-					for (const TPair<FName, float>& Pair : NamesToSend)
-					{
-						SendTextureOnRenderThread(Pair.Key, BackBuffer, true, Pair.Value, RHICmdList);
-					}
-				});
+					const FTextureRHIRef BackBufferCopy = BackBuffer;
+
+					ENQUEUE_RENDER_COMMAND(SpoutViewportSend)(
+						[NamesToSend = MoveTemp(NamesToSend), BackBufferCopy](FRHICommandListImmediate& RHICmdList)
+						{
+							for (const TPair<FName, float>& Pair : NamesToSend)
+							{
+								SendTextureOnRenderThread(
+									Pair.Key,
+									BackBufferCopy,
+									true,
+									Pair.Value,
+									RHICmdList
+								);
+							}
+						}
+					);
+				}
+			);
 
 			bRegistered = BackBufferHandle.IsValid();
 			return bRegistered;

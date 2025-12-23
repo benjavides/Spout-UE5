@@ -9,6 +9,7 @@
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"
 #include <d3d11.h>
 #include <d3d11on12.h>
 #include <d3d12.h>
@@ -16,6 +17,9 @@
 #include "SpoutDX/SpoutDirectX.h"
 #include "SpoutDX/SpoutSenderNames.h"
 #include "Windows/HideWindowsPlatformTypes.h"
+#ifdef GetNextSibling
+#undef GetNextSibling
+#endif
 #endif
 
 class FSpoutD3DContext

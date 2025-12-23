@@ -13,6 +13,11 @@
 #include "Materials/MaterialInterface.h"
 #include "RHI.h"
 #include "RenderingThread.h"
+#include "Engine/Texture.h"
+#include "TextureResource.h"
+#include "RenderResource.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/TextureRenderTarget.h"
 
 using Microsoft::WRL::ComPtr;
 
