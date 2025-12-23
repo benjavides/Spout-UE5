@@ -44,11 +44,29 @@ If you need a production-ready, paid solution with more features beyond Spout, c
 
 This plugin is intended to be built as part of a **project**, not as an engine plugin.
 
-### Supported Unreal Engine versions
-- **Tested on Unreal Engine 5.3 and newer**
-- UE 5.1 and 5.2 may work but are not actively supported
+## Supported Unreal Engine versions
 
-### Build steps
+- **Tested and officially supported on Unreal Engine 5.5 and newer**
+- **Unreal Engine 5.1 to 5.4 are NOT officially supported**
+
+⚠️ **Important note about UE 5.3 and 5.4**
+
+Unreal Engine **5.3 and 5.4 currently fail to build this plugin when using an installed (non-source) engine** due to engine-level build environment restrictions and macro handling issues (notably around `__has_feature` and global build definitions).  
+This is a known Unreal Build Tool limitation and **not a runtime bug in the plugin itself**.
+
+At the moment, there is **no clean workaround** that:
+- works with an installed engine,
+- avoids modifying engine source,
+- and keeps the plugin distributable.
+
+For this reason, **support starts from UE 5.5+ only**.
+
+If you **know a workaround**, have a **clean fix**, or have successfully built this plugin on **UE 5.3 or 5.4 without engine source modifications**, please get in touch.  
+Contributions, insights, and tested solutions are very welcome.
+
+---
+
+## Build steps
 
 1. Copy the `SpoutPlugin` folder into your project’s `Plugins/` directory.
 2. Make sure the plugin is enabled in your project settings.
@@ -58,11 +76,18 @@ This plugin is intended to be built as part of a **project**, not as an engine p
 
 The bundled `Spout.dll` will be staged automatically into your project’s `Binaries/Win64` directory during the build process.
 
-### Notes
+---
 
-- This plugin is **Windows-only**.
-- A working C++ toolchain is required (Visual Studio with the appropriate Windows SDK).
-- If you encounter build errors after upgrading Unreal Engine versions, try cleaning the project and regenerating project files.
+## Notes
+
+- This plugin is **Windows-only**
+- A working C++ toolchain is required (Visual Studio with the appropriate Windows SDK)
+- If you encounter build errors after upgrading Unreal Engine versions:
+  - Clean the project
+  - Regenerate project files
+  - Rebuild from scratch
+
+
 
 ## Installation
 1. Download the plugin for your Unreal Engine version from the [Releases](../../releases) page if you do not wish to build it yourself.
