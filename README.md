@@ -1,4 +1,6 @@
-﻿# SpoutPlugin (UE5)
+﻿[![Patreon](https://img.shields.io/badge/Patreon-Support%20this%20project-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/c/kesson_lab)
+
+# SpoutPlugin (UE5)
 
 Windows-only Unreal Engine 5 plugin that sends and receives textures via Spout using a DX11-on-DX12 bridge.
 
@@ -90,9 +92,19 @@ The bundled `Spout.dll` will be staged automatically into your project’s `Bina
 
 
 ## Installation
-1. Download the plugin for your Unreal Engine version from the [Releases](../../releases) page if you do not wish to build it yourself.
-2. Copy the `SpoutPlugin` folder into your project `Plugins/` directory.
-3. Ensure the plugin is enabled in your project.
+
+Pre-built versions of this plugin are distributed through Patreon **with free download**.
+
+👉 **Download access and updates are available here:**  
+https://www.patreon.com/posts/spout-plugin-for-146572687
+
+If you prefer building from source, clone this repository and follow the build steps above.
+
+In some cases, you may also be able to drop the plugin into your project as-is.  
+When opening the project, Unreal may ask to rebuild the plugin because it was compiled with a different engine version. If that happens, click **Yes** and let Unreal rebuild it.
+
+This approach does **not work 100% of the time**, depending on engine version and toolchain, but it may be worth trying before building manually.
+
 
 
 ## Usage
