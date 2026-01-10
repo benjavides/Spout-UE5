@@ -116,6 +116,9 @@ namespace
 			VertexShader.Reset();
 			PixelShader.Reset();
 			SamplerState.Reset();
+			RasterizerState.Reset();
+			BlendState.Reset();
+			DepthStencilState.Reset();
 			GammaBuffer.Reset();
 			bInitialized = false;
 
@@ -234,6 +237,38 @@ float4 PSMain(VSOut i) : SV_Target
 				return false;
 			}
 
+			D3D11_RASTERIZER_DESC RasterDesc = {};
+			RasterDesc.FillMode = D3D11_FILL_SOLID;
+			RasterDesc.CullMode = D3D11_CULL_NONE;
+			RasterDesc.ScissorEnable = false;
+			RasterDesc.DepthClipEnable = true;
+			hr = InDevice->CreateRasterizerState(&RasterDesc, RasterizerState.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma rasterizer (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			D3D11_BLEND_DESC BlendDesc = {};
+			BlendDesc.RenderTarget[0].BlendEnable = false;
+			BlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+			hr = InDevice->CreateBlendState(&BlendDesc, BlendState.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma blend state (hr=0x%08x)"), hr);
+				return false;
+			}
+
+			D3D11_DEPTH_STENCIL_DESC DepthDesc = {};
+			DepthDesc.DepthEnable = false;
+			DepthDesc.StencilEnable = false;
+			hr = InDevice->CreateDepthStencilState(&DepthDesc, DepthStencilState.GetAddressOf());
+			if (FAILED(hr))
+			{
+				UE_LOG(LogSpoutPlugin, Error, TEXT("Failed to create Spout gamma depth state (hr=0x%08x)"), hr);
+				return false;
+			}
+
 			D3D11_BUFFER_DESC BufferDesc = {};
 			BufferDesc.ByteWidth = sizeof(FSpoutGammaConstants);
 			BufferDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -274,9 +309,13 @@ float4 PSMain(VSOut i) : SV_Target
 			Viewport.MinDepth = 0.0f;
 			Viewport.MaxDepth = 1.0f;
 			ImmediateContext->RSSetViewports(1, &Viewport);
+			ImmediateContext->RSSetState(RasterizerState.Get());
 
 			ID3D11RenderTargetView* RenderTargets[1] = { OutputRTV };
 			ImmediateContext->OMSetRenderTargets(1, RenderTargets, nullptr);
+			const float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			ImmediateContext->OMSetBlendState(BlendState.Get(), BlendFactor, 0xFFFFFFFF);
+			ImmediateContext->OMSetDepthStencilState(DepthStencilState.Get(), 0);
 			ImmediateContext->IASetInputLayout(nullptr);
 			ImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -309,127 +348,86 @@ float4 PSMain(VSOut i) : SV_Target
 		ComPtr<ID3D11VertexShader> VertexShader;
 		ComPtr<ID3D11PixelShader> PixelShader;
 		ComPtr<ID3D11SamplerState> SamplerState;
+		ComPtr<ID3D11RasterizerState> RasterizerState;
+		ComPtr<ID3D11BlendState> BlendState;
+		ComPtr<ID3D11DepthStencilState> DepthStencilState;
 		ComPtr<ID3D11Buffer> GammaBuffer;
 	};
 
-	float SanitizeGamma(float Gamma)
+// Gamma helpers are kept for potential future use; currently unused.
+float SanitizeGamma(float Gamma)
+{
+	if (Gamma <= 0.0f)
 	{
-		if (Gamma <= 0.0f)
-		{
-			return 1.0f;
-		}
-
-		return FMath::Clamp(Gamma, 0.01f, 10.0f);
+		return 1.0f;
 	}
 
-	bool EnsureGammaResources(FSpoutSharedSender& Sender, uint32 Width, uint32 Height, DXGI_FORMAT Format, FSpoutD3DContext& Context, ComPtr<ID3D11Texture2D>& OutTexture, ComPtr<ID3D11RenderTargetView>& OutRTV)
-	{
-		FScopeLock SenderLock(&Sender.ResourceMutex);
-		bool bNeedsCreate = false;
+	return FMath::Clamp(Gamma, 0.01f, 10.0f);
+}
 
-		if (!Sender.GammaTexture || !Sender.GammaRTV)
+bool EnsureGammaResources(FSpoutSharedSender& Sender, uint32 Width, uint32 Height, DXGI_FORMAT Format, FSpoutD3DContext& Context, ComPtr<ID3D11Texture2D>& OutTexture, ComPtr<ID3D11RenderTargetView>& OutRTV)
+{
+	FScopeLock SenderLock(&Sender.ResourceMutex);
+	bool bNeedsCreate = false;
+
+	if (!Sender.GammaTexture || !Sender.GammaRTV)
+	{
+		bNeedsCreate = true;
+	}
+	else
+	{
+		D3D11_TEXTURE2D_DESC Desc;
+		Sender.GammaTexture->GetDesc(&Desc);
+		if (Desc.Width != Width || Desc.Height != Height || Desc.Format != Format)
 		{
 			bNeedsCreate = true;
 		}
-		else
-		{
-			D3D11_TEXTURE2D_DESC Desc;
-			Sender.GammaTexture->GetDesc(&Desc);
-			if (Desc.Width != Width || Desc.Height != Height || Desc.Format != Format)
-			{
-				bNeedsCreate = true;
-			}
-		}
-
-		if (bNeedsCreate)
-		{
-			Sender.GammaTexture.Reset();
-			Sender.GammaRTV.Reset();
-
-			spoutDirectX* SpoutDX = Context.GetSpoutDirectX();
-			ID3D11Device* Device = Context.GetD3D11Device();
-			if (!SpoutDX || !Device)
-			{
-				return false;
-			}
-
-			ComPtr<ID3D11Texture2D> NewTexture;
-			const bool bCreated = SpoutDX->CreateDX11Texture(
-				Device,
-				Width,
-				Height,
-				Format,
-				D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
-				0,
-				NewTexture.GetAddressOf());
-
-			if (!bCreated || !NewTexture)
-			{
-				return false;
-			}
-
-			ComPtr<ID3D11RenderTargetView> NewRTV;
-			HRESULT hr = Device->CreateRenderTargetView(NewTexture.Get(), nullptr, NewRTV.GetAddressOf());
-			if (FAILED(hr))
-			{
-				return false;
-			}
-
-			Sender.GammaTexture = MoveTemp(NewTexture);
-			Sender.GammaRTV = MoveTemp(NewRTV);
-		}
-
-		OutTexture = Sender.GammaTexture;
-		OutRTV = Sender.GammaRTV;
-		return OutTexture && OutRTV;
 	}
 
-	bool ApplyGammaCopy(FSpoutSharedSender& Sender, const ComPtr<ID3D11Texture2D>& SharedTexture, const ComPtr<ID3D11Texture2D>& WrappedResource, uint32 Width, uint32 Height, DXGI_FORMAT Format, float Gamma, FSpoutD3DContext& Context)
+	if (bNeedsCreate)
 	{
+		Sender.GammaTexture.Reset();
+		Sender.GammaRTV.Reset();
+
+		spoutDirectX* SpoutDX = Context.GetSpoutDirectX();
 		ID3D11Device* Device = Context.GetD3D11Device();
-		ID3D11DeviceContext* ImmediateContext = Context.GetImmediateContext();
-		if (!Device || !ImmediateContext)
+		if (!SpoutDX || !Device)
 		{
 			return false;
 		}
 
-		ComPtr<ID3D11Texture2D> GammaTexture;
-		ComPtr<ID3D11RenderTargetView> GammaRTV;
-		if (!EnsureGammaResources(Sender, Width, Height, Format, Context, GammaTexture, GammaRTV))
+		ComPtr<ID3D11Texture2D> NewTexture;
+		const bool bCreated = SpoutDX->CreateDX11Texture(
+			Device,
+			Width,
+			Height,
+			Format,
+			D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+			0,
+			NewTexture.GetAddressOf());
+
+		if (!bCreated || !NewTexture)
 		{
 			return false;
 		}
 
-		D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-		SRVDesc.Format = Format;
-		SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		SRVDesc.Texture2D.MostDetailedMip = 0;
-		SRVDesc.Texture2D.MipLevels = 1;
-
-		ComPtr<ID3D11ShaderResourceView> WrappedSRV;
-		HRESULT hr = Device->CreateShaderResourceView(WrappedResource.Get(), &SRVDesc, WrappedSRV.GetAddressOf());
+		ComPtr<ID3D11RenderTargetView> NewRTV;
+		HRESULT hr = Device->CreateRenderTargetView(NewTexture.Get(), nullptr, NewRTV.GetAddressOf());
 		if (FAILED(hr))
 		{
 			return false;
 		}
 
-		FSpoutGammaPipeline& Pipeline = FSpoutGammaPipeline::Get();
-		if (!Pipeline.Initialize(Device))
-		{
-			return false;
-		}
-
-		if (!Pipeline.Apply(ImmediateContext, WrappedSRV.Get(), GammaRTV.Get(), Gamma, Width, Height))
-		{
-			return false;
-		}
-
-		ImmediateContext->CopyResource(SharedTexture.Get(), GammaTexture.Get());
-		ImmediateContext->Flush();
-		return true;
+		Sender.GammaTexture = MoveTemp(NewTexture);
+		Sender.GammaRTV = MoveTemp(NewRTV);
 	}
 
-	void SendTextureOnRenderThread(const FName SpoutName, const FTextureRHIRef& SourceRHI, bool bIsViewport, float Gamma, FRHICommandListImmediate& RHICmdList)
+	OutTexture = Sender.GammaTexture;
+	OutRTV = Sender.GammaRTV;
+	return OutTexture && OutRTV;
+}
+
+	void SendTextureOnRenderThread(const FName SpoutName, const FTextureRHIRef& SourceRHI, bool bIsViewport, FRHICommandListImmediate& RHICmdList)
 	{
 		if (!SourceRHI.IsValid())
 		{
@@ -485,23 +483,11 @@ float4 PSMain(VSOut i) : SV_Target
 		ComPtr<ID3D11Texture2D> WrappedResource = SharedTexture ? GetWrappedResource(*Sender, NativeRes) : nullptr;
 		if (SharedTexture && WrappedResource)
 		{
-			// Acquire transitions the wrapped resource for D3D11 access.
 			FScopedD3D11On12Acquire Acquire(WrappedResource.Get());
 			if (Acquire.IsValid())
 			{
-				const float SafeGamma = SanitizeGamma(Gamma);
-				const bool bApplyGamma = !FMath::IsNearlyEqual(SafeGamma, 1.0f, 0.001f);
-
-				if (bApplyGamma && ApplyGammaCopy(*Sender, SharedTexture, WrappedResource, static_cast<uint32>(Desc.Width), static_cast<uint32>(Desc.Height), Format, SafeGamma, Context))
-				{
-					// Gamma-corrected copy performed in ApplyGammaCopy.
-				}
-				else
-				{
-					// Copy UE's D3D12 texture into the shared DX11 texture.
-					Context.GetImmediateContext()->CopyResource(SharedTexture.Get(), WrappedResource.Get());
-					Context.GetImmediateContext()->Flush();
-				}
+				Context.GetImmediateContext()->CopyResource(SharedTexture.Get(), WrappedResource.Get());
+				Context.GetImmediateContext()->Flush();
 			}
 		}
 
@@ -522,7 +508,7 @@ float4 PSMain(VSOut i) : SV_Target
 			return Instance;
 		}
 
-		bool QueueSend(const FName& SpoutName, float Gamma)
+		bool QueueSend(const FName& SpoutName)
 		{
 			if (SpoutName.IsNone())
 			{
@@ -535,7 +521,7 @@ float4 PSMain(VSOut i) : SV_Target
 			}
 
 			FScopeLock Lock(&PendingMutex);
-			PendingGammas.FindOrAdd(SpoutName) = Gamma;
+			PendingSenders.Add(SpoutName);
 			return true;
 		}
 
@@ -553,7 +539,7 @@ float4 PSMain(VSOut i) : SV_Target
 			BackBufferHandle.Reset();
 
 			FScopeLock Lock(&PendingMutex);
-			PendingGammas.Reset();
+			PendingSenders.Reset();
 		}
 
 	private:
@@ -607,11 +593,11 @@ float4 PSMain(VSOut i) : SV_Target
 						return;
 					}
 
-					TMap<FName, float> NamesToSend;
+					TArray<FName> NamesToSend;
 					{
 						FScopeLock Lock(&PendingMutex);
-						NamesToSend = MoveTemp(PendingGammas);
-						PendingGammas.Reset();
+						NamesToSend = PendingSenders.Array();
+						PendingSenders.Reset();
 					}
 
 					if (NamesToSend.Num() == 0)
@@ -624,13 +610,12 @@ float4 PSMain(VSOut i) : SV_Target
 					ENQUEUE_RENDER_COMMAND(SpoutViewportSend)(
 						[NamesToSend = MoveTemp(NamesToSend), BackBufferCopy](FRHICommandListImmediate& RHICmdList)
 						{
-							for (const TPair<FName, float>& Pair : NamesToSend)
+							for (const FName& Name : NamesToSend)
 							{
 								SendTextureOnRenderThread(
-									Pair.Key,
+									Name,
 									BackBufferCopy,
 									true,
-									Pair.Value,
 									RHICmdList
 								);
 							}
@@ -644,7 +629,7 @@ float4 PSMain(VSOut i) : SV_Target
 		}
 
 		FCriticalSection PendingMutex;
-		TMap<FName, float> PendingGammas;
+		TSet<FName> PendingSenders;
 		TWeakPtr<SWindow> TargetWindow;
 		FDelegateHandle BackBufferHandle;
 		bool bRegistered = false;
@@ -729,7 +714,7 @@ float4 PSMain(VSOut i) : SV_Target
 	}
 }
 
-bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D, float Gamma)
+bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D)
 {
 	FSpoutD3DContext& Context = FSpoutD3DContext::Get();
 	Context.InitializeIfNeeded();
@@ -747,7 +732,7 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 		}
 
 		// Queue the request; capture happens when the backbuffer is ready to present.
-		return FSpoutViewportSender::Get().QueueSend(SpoutName, Gamma);
+		return FSpoutViewportSender::Get().QueueSend(SpoutName);
 	}
 
 	FSpoutSendSource SendSource;
@@ -758,7 +743,7 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 
 	// The copy must run on the render thread to safely touch RHI resources.
 	ENQUEUE_RENDER_COMMAND(SpoutSenderCmd)(
-		[SpoutName, SendSource, Gamma](FRHICommandListImmediate& RHICmdList)
+		[SpoutName, SendSource](FRHICommandListImmediate& RHICmdList)
 		{
 			FTextureRHIRef LocalSourceRHI = SendSource.SourceRHI;
 			if (SendSource.bUseRenderTarget)
@@ -775,7 +760,7 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 				return;
 			}
 
-			SendTextureOnRenderThread(SpoutName, LocalSourceRHI, SendSource.bIsViewport, Gamma, RHICmdList);
+			SendTextureOnRenderThread(SpoutName, LocalSourceRHI, SendSource.bIsViewport, RHICmdList);
 		});
 
 	return true;

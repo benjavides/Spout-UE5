@@ -109,13 +109,11 @@ public:
 	/**
 	 * Sends a texture to Spout asynchronously via the render thread.
 	 * This does NOT stall the game thread, but does perform a GPU copy on the render thread.
-	 * Gamma applies a pow(color, Gamma) correction before sharing (1.0 = no change).
 	 */
 	UFUNCTION(BlueprintCallable, Category="Spout")
 	static bool SpoutSender(FName SpoutName,
 							ESpoutSendTextureFrom SendTextureFrom,
-							UTextureRenderTarget2D* TextureRenderTarget2D,
-							float Gamma = 1.0f);
+							UTextureRenderTarget2D* TextureRenderTarget2D);
 
 	UFUNCTION(BlueprintCallable, Category = "Spout")
 	static void CloseSender(FName SpoutName);
