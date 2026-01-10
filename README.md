@@ -127,7 +127,8 @@ When using a `TextureRenderTarget2D` as the source for the Sender, a common setu
 
 In this case, the `SceneCapture2D` **Capture Source** must be set to:
 
-- **`FinalColor (LDR)`**
+- **~~`FinalColor (LDR)`~~**
+- **Final Color (HDR) in Linear Working Color Space**
 
 and **not** to `SceneColor (HDR) in RGB`.
 
