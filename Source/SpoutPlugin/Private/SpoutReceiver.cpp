@@ -1,16 +1,25 @@
 /**
- * Implements the Spout receiver flow by opening shared DX11 textures, reading back into
- * CPU memory, and updating UE transient textures via the render thread.
+ * Implements the Spout receiver flow.
+ *
+ * Two paths are supported, controlled by CVar r.Spout.GPUReceiver:
+ *   - GPU path (default, CVar=1): opens the external sender's shared DX11 texture and
+ *     copies it directly into the UE RHI destination via D3D11-on-12 wrapping.
+ *     No CPU readback, no staging texture map.
+ *   - CPU path (CVar=0): legacy fallback — copies into a D3D11 STAGING texture, maps it,
+ *     uploads via RHIUpdateTexture2D straight from the mapped pointer. Preserved for
+ *     bisection/debug parity with the previous build.
  */
 #include "SpoutReceiver.h"
 #include "Materials/MaterialInterface.h"
 #include "SpoutD3DContext.h"
+#include "SpoutD3DUtils.h"
 #include "SpoutSenderRegistry.h"
 #include "SpoutTextureUtils.h"
 #include "SpoutModule.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "HAL/IConsoleManager.h"
 #include "RHI.h"
 #include "RenderingThread.h"
 #include "Engine/Texture.h"
@@ -23,6 +32,12 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
+	static TAutoConsoleVariable<int32> CVarSpoutGPUReceiver(
+		TEXT("r.Spout.GPUReceiver"),
+		1,
+		TEXT("Spout receiver path: 1 = GPU-direct via D3D11-on-12 (H2A, default), 0 = legacy CPU readback (H2B)."),
+		ECVF_Default);
+
 	bool QuerySenderInfo(const FName& SpoutName, unsigned int& OutWidth, unsigned int& OutHeight, HANDLE& OutHandle, unsigned long& OutFormat)
 	{
 		FSpoutD3DContext& Context = FSpoutD3DContext::Get();
@@ -67,11 +82,31 @@ namespace
 		Receiver.SharedHandle = SharedHandle;
 		// SharedTexture is owned by this receiver; the sender owns the underlying resource.
 		Receiver.SharedTexture = MoveTemp(NewSharedTexture);
+		// Invalidate caches tied to previous geometry/handle.
 		Receiver.StagingTexture.Reset();
+		Receiver.CachedWrappedResource.Reset();
+		Receiver.CachedNativeResource = nullptr;
+		Receiver.CachedRTWrappedResource.Reset();
+		Receiver.CachedRTNativeResource = nullptr;
 
 		return true;
 	}
 
+	// GPU path: return just the shared texture + dimensions. No staging involvement.
+	bool GetSharedForGPUPath(FSpoutSharedSender& Receiver, ComPtr<ID3D11Texture2D>& OutShared, uint32& OutWidth, uint32& OutHeight)
+	{
+		FScopeLock ReceiverLock(&Receiver.ResourceMutex);
+		if (!Receiver.SharedTexture)
+		{
+			return false;
+		}
+		OutWidth = Receiver.Width;
+		OutHeight = Receiver.Height;
+		OutShared = Receiver.SharedTexture;
+		return true;
+	}
+
+	// CPU path: return shared + staging (creating/resizing the staging texture on demand).
 	bool GetSharedAndStaging(FSpoutSharedSender& Receiver, FSpoutD3DContext& Context, ComPtr<ID3D11Texture2D>& OutShared, ComPtr<ID3D11Texture2D>& OutStaging, uint32& OutWidth, uint32& OutHeight)
 	{
 		FScopeLock ReceiverLock(&Receiver.ResourceMutex);
@@ -128,6 +163,31 @@ namespace
 		return OutStaging != nullptr;
 	}
 
+	// Cache a D3D11-on-12 wrap of the primary UE RHI destination (UTexture backing).
+	// Keyed on native D3D12 pointer so UE texture recreation invalidates the wrap.
+	ComPtr<ID3D11Texture2D> GetOrCreateReceiverWrap(FSpoutSharedSender& Receiver, ID3D12Resource* NativeResource)
+	{
+		FScopeLock ReceiverLock(&Receiver.ResourceMutex);
+		if (Receiver.CachedNativeResource != NativeResource || !Receiver.CachedWrappedResource)
+		{
+			Receiver.CachedWrappedResource = WrapD3D12Resource(NativeResource, D3D12_RESOURCE_STATE_COPY_DEST);
+			Receiver.CachedNativeResource = NativeResource;
+		}
+		return Receiver.CachedWrappedResource;
+	}
+
+	// Cache a D3D11-on-12 wrap of the optional secondary UE RHI destination (render target).
+	ComPtr<ID3D11Texture2D> GetOrCreateReceiverRTWrap(FSpoutSharedSender& Receiver, ID3D12Resource* NativeResource)
+	{
+		FScopeLock ReceiverLock(&Receiver.ResourceMutex);
+		if (Receiver.CachedRTNativeResource != NativeResource || !Receiver.CachedRTWrappedResource)
+		{
+			Receiver.CachedRTWrappedResource = WrapD3D12Resource(NativeResource, D3D12_RESOURCE_STATE_COPY_DEST);
+			Receiver.CachedRTNativeResource = NativeResource;
+		}
+		return Receiver.CachedRTWrappedResource;
+	}
+
 	EPixelFormat DxgiFormatToPixelFormat(unsigned long DxgiFormat)
 	{
 		switch (static_cast<DXGI_FORMAT>(DxgiFormat))
@@ -154,13 +214,187 @@ namespace
 			return PF_B8G8R8A8;
 		}
 	}
+
+	// GPU-direct path (H2A): wrap UE RHI destinations as D3D11 textures via D3D11-on-12 and
+	// issue CopyResource straight from the external shared texture. Zero CPU readback.
+	void ReceiveOnRenderThread_GPU(
+		TSharedPtr<FSpoutSharedSender> Receiver,
+		TRefCountPtr<FRHITexture> DestTextureRHI,
+		TRefCountPtr<FRHITexture> DestRenderTargetRHI,
+		FRHICommandListImmediate& RHICmdList)
+	{
+		if (!DestTextureRHI.IsValid() && !DestRenderTargetRHI.IsValid())
+		{
+			return;
+		}
+
+		FSpoutD3DContext& Context = FSpoutD3DContext::Get();
+
+		ComPtr<ID3D11Texture2D> SharedTexture;
+		uint32 LocalWidth = 0;
+		uint32 LocalHeight = 0;
+		if (!GetSharedForGPUPath(*Receiver, SharedTexture, LocalWidth, LocalHeight))
+		{
+			return;
+		}
+
+		// Resolve native D3D12 resources up front. A null native means interop wrapping is
+		// unavailable for that destination and it must be skipped (not fatal for the other).
+		ID3D12Resource* DestNative = nullptr;
+		ID3D12Resource* DestRTNative = nullptr;
+
+		if (DestTextureRHI.IsValid())
+		{
+			DestNative = static_cast<ID3D12Resource*>(DestTextureRHI->GetNativeResource());
+		}
+		if (DestRenderTargetRHI.IsValid())
+		{
+			DestRTNative = static_cast<ID3D12Resource*>(DestRenderTargetRHI->GetNativeResource());
+		}
+
+		if (!DestNative && !DestRTNative)
+		{
+			return;
+		}
+
+		// Transition UE-tracked destinations into CopyDest. Must happen before the D3D11-on-12
+		// Acquire, because Acquire assumes the resource is already in the state we declared
+		// at CreateWrappedResource time.
+		if (DestTextureRHI.IsValid() && DestNative)
+		{
+			RHICmdList.Transition(FRHITransitionInfo(DestTextureRHI, ERHIAccess::SRVMask, ERHIAccess::CopyDest));
+		}
+		if (DestRenderTargetRHI.IsValid() && DestRTNative)
+		{
+			RHICmdList.Transition(FRHITransitionInfo(DestRenderTargetRHI, ERHIAccess::SRVMask, ERHIAccess::CopyDest));
+		}
+
+		// Flush so D3D12 state transitions are submitted and visible to the D3D11-on-12 device
+		// before Acquire/CopyResource runs. Mirrors the sender path.
+		RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThreadFlushResources);
+
+		{
+			// Serialize D3D11 immediate-context access with the sender path.
+			FScopeLock ContextLock(&Context.GetD3D11ContextMutex());
+
+			ID3D11DeviceContext* ImmediateContext = Context.GetImmediateContext();
+			ID3D11On12Device* D3D11On12 = Context.GetD3D11On12Device();
+			if (ImmediateContext && D3D11On12)
+			{
+				if (DestTextureRHI.IsValid() && DestNative)
+				{
+					ComPtr<ID3D11Texture2D> Wrapped = GetOrCreateReceiverWrap(*Receiver, DestNative);
+					if (Wrapped)
+					{
+						// Acquire transitions the wrapped resource into the state declared at wrap
+						// (COPY_DEST). Destructor Releases + Flushes so the D3D12 queue sees the copy.
+						FScopedD3D11On12Acquire Acquire(Wrapped.Get());
+						if (Acquire.IsValid())
+						{
+							ImmediateContext->CopyResource(Wrapped.Get(), SharedTexture.Get());
+						}
+					}
+				}
+
+				if (DestRenderTargetRHI.IsValid() && DestRTNative)
+				{
+					ComPtr<ID3D11Texture2D> WrappedRT = GetOrCreateReceiverRTWrap(*Receiver, DestRTNative);
+					if (WrappedRT)
+					{
+						FScopedD3D11On12Acquire Acquire(WrappedRT.Get());
+						if (Acquire.IsValid())
+						{
+							ImmediateContext->CopyResource(WrappedRT.Get(), SharedTexture.Get());
+						}
+					}
+				}
+			}
+		}
+
+		// Always restore SRVMask, even if Wrap/Acquire failed, so UE's state tracking stays
+		// consistent with our earlier Transition.
+		if (DestTextureRHI.IsValid() && DestNative)
+		{
+			RHICmdList.Transition(FRHITransitionInfo(DestTextureRHI, ERHIAccess::CopyDest, ERHIAccess::SRVMask));
+		}
+		if (DestRenderTargetRHI.IsValid() && DestRTNative)
+		{
+			RHICmdList.Transition(FRHITransitionInfo(DestRenderTargetRHI, ERHIAccess::CopyDest, ERHIAccess::SRVMask));
+		}
+	}
+
+	// CPU fallback path (Variant B from round 2). Copy into a STAGING texture, Map, issue
+	// RHIUpdateTexture2D straight from the mapped pointer (no intermediate TArray copy),
+	// defer Unmap until after both updates return.
+	void ReceiveOnRenderThread_CPU(
+		TSharedPtr<FSpoutSharedSender> Receiver,
+		TRefCountPtr<FRHITexture> DestTextureRHI,
+		TRefCountPtr<FRHITexture> DestRenderTargetRHI)
+	{
+		if (!DestTextureRHI.IsValid() && !DestRenderTargetRHI.IsValid())
+		{
+			return;
+		}
+
+		FSpoutD3DContext& Context = FSpoutD3DContext::Get();
+		ComPtr<ID3D11Texture2D> SharedTexture;
+		ComPtr<ID3D11Texture2D> StagingTexture;
+		uint32 LocalWidth = 0;
+		uint32 LocalHeight = 0;
+
+		if (!GetSharedAndStaging(*Receiver, Context, SharedTexture, StagingTexture, LocalWidth, LocalHeight))
+		{
+			return;
+		}
+
+		// D3D11 immediate context use is serialized across sender/receiver paths.
+		FScopeLock Lock(&Context.GetD3D11ContextMutex());
+		ID3D11DeviceContext* ImmediateContext = Context.GetImmediateContext();
+		if (!ImmediateContext || !SharedTexture || !StagingTexture)
+		{
+			return;
+		}
+
+		// Copy into a CPU-readable staging texture.
+		ImmediateContext->CopyResource(StagingTexture.Get(), SharedTexture.Get());
+
+		D3D11_MAPPED_SUBRESOURCE Mapped;
+		if (SUCCEEDED(ImmediateContext->Map(StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &Mapped)))
+		{
+			// FRHIComputeCommandList::UpdateTexture2D copies SourceData synchronously inside
+			// the call, so Mapped.pData only needs to stay valid until both update calls return.
+			const uint8* const SourceData = static_cast<const uint8*>(Mapped.pData);
+			const FUpdateTextureRegion2D UpdateRegion(0, 0, 0, 0, LocalWidth, LocalHeight);
+
+			if (DestTextureRHI.IsValid())
+			{
+				RHIUpdateTexture2D(
+					DestTextureRHI,
+					0,
+					UpdateRegion,
+					Mapped.RowPitch,
+					SourceData
+				);
+			}
+
+			if (DestRenderTargetRHI.IsValid())
+			{
+				RHIUpdateTexture2D(
+					DestRenderTargetRHI,
+					0,
+					UpdateRegion,
+					Mapped.RowPitch,
+					SourceData
+				);
+			}
+
+			ImmediateContext->Unmap(StagingTexture.Get(), 0);
+		}
+	}
 }
 
 bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMaterial, FName TextureParameterName, UMaterialInstanceDynamic*& OutMat, UTexture2D*& OutTexture, UTextureRenderTarget2D* OptionalOutputRenderTarget)
 {
-	// OptionalOutputRenderTarget is currently unused; kept for future GPU paths.
-	static_cast<void>(OptionalOutputRenderTarget);
-
 	FSpoutD3DContext& Context = FSpoutD3DContext::Get();
 	Context.InitializeIfNeeded();
 
@@ -229,76 +463,19 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 		}
 	}
 
-	// Readback + texture update must run on the render thread.
+	// Read CVar once on the game thread so one frame uses a single coherent path.
+	const bool bUseGPUPath = CVarSpoutGPUReceiver.GetValueOnAnyThread() != 0;
+
 	ENQUEUE_RENDER_COMMAND(SpoutRecvCmd)(
-		[Receiver, CapturedTextureRHI, CapturedRenderTargetRHI](FRHICommandListImmediate& RHICmdList)
+		[Receiver, CapturedTextureRHI, CapturedRenderTargetRHI, bUseGPUPath](FRHICommandListImmediate& RHICmdList)
 		{
-			if (!CapturedTextureRHI.IsValid() && !CapturedRenderTargetRHI.IsValid())
+			if (bUseGPUPath)
 			{
-				return;
+				ReceiveOnRenderThread_GPU(Receiver, CapturedTextureRHI, CapturedRenderTargetRHI, RHICmdList);
 			}
-
-			FSpoutD3DContext& Context = FSpoutD3DContext::Get();
-			ComPtr<ID3D11Texture2D> SharedTexture;
-			ComPtr<ID3D11Texture2D> StagingTexture;
-			uint32 LocalWidth = 0;
-			uint32 LocalHeight = 0;
-
-			if (!GetSharedAndStaging(*Receiver, Context, SharedTexture, StagingTexture, LocalWidth, LocalHeight))
+			else
 			{
-				return;
-			}
-
-			// D3D11 immediate context use is serialized across sender/receiver paths.
-			FScopeLock Lock(&Context.GetD3D11ContextMutex());
-			ID3D11DeviceContext* ImmediateContext = Context.GetImmediateContext();
-			if (!ImmediateContext || !SharedTexture || !StagingTexture)
-			{
-				return;
-			}
-
-			// Copy into a CPU-readable staging texture.
-			ImmediateContext->CopyResource(StagingTexture.Get(), SharedTexture.Get());
-
-			D3D11_MAPPED_SUBRESOURCE Mapped;
-			if (SUCCEEDED(ImmediateContext->Map(StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &Mapped)))
-			{
-				// NOTE: This is still a CPU readback + upload each frame. The Variant-B
-				// optimization here is to hand Mapped.pData straight to RHIUpdateTexture2D
-				// and defer Unmap until both updates have executed, eliminating one full
-				// memcpy and one heap allocation per frame.
-				//
-				// Safety: FRHIComputeCommandList::UpdateTexture2D (non-bypass path) allocates
-				// command-list memory and memcpy's SourceData into it synchronously inside
-				// the call, before returning. The bypass path copies synchronously too.
-				// Either way, Mapped.pData only needs to stay valid until the two
-				// RHIUpdateTexture2D calls return, which is satisfied by the Unmap placement.
-				const uint8* const SourceData = static_cast<const uint8*>(Mapped.pData);
-				const FUpdateTextureRegion2D UpdateRegion(0, 0, 0, 0, LocalWidth, LocalHeight);
-
-				if (CapturedTextureRHI.IsValid())
-				{
-					RHIUpdateTexture2D(
-						CapturedTextureRHI,
-						0,
-						UpdateRegion,
-						Mapped.RowPitch,
-						SourceData
-					);
-				}
-
-				if (CapturedRenderTargetRHI.IsValid())
-				{
-					RHIUpdateTexture2D(
-						CapturedRenderTargetRHI,
-						0,
-						UpdateRegion,
-						Mapped.RowPitch,
-						SourceData
-					);
-				}
-
-				ImmediateContext->Unmap(StagingTexture.Get(), 0);
+				ReceiveOnRenderThread_CPU(Receiver, CapturedTextureRHI, CapturedRenderTargetRHI);
 			}
 		});
 

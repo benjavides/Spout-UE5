@@ -41,9 +41,16 @@ public:
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> GammaTexture;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> GammaRTV;
 
-	// Cached D3D11 wrapper for a D3D12 resource (sender path).
+	// Cached D3D11 wrapper for a D3D12 resource.
+	// - Sender role: wraps the source UE RHI texture (state = COPY_SOURCE).
+	// - Receiver role: wraps the primary destination UE RHI texture (state = COPY_DEST).
+	// The role is fixed per FSpoutSharedSender instance because the registry is keyed by (Name, Type).
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> CachedWrappedResource;
 	void* CachedNativeResource = nullptr;
+
+	// Receiver role only: wraps the optional secondary render-target destination (state = COPY_DEST).
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> CachedRTWrappedResource;
+	void* CachedRTNativeResource = nullptr;
 
 	// Protects SharedTexture/handle updates across game and render threads.
 	FCriticalSection ResourceMutex;

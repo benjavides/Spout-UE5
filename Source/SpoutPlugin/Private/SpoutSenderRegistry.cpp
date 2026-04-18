@@ -24,11 +24,13 @@ void FSpoutSharedSender::ReleaseResources()
 	SharedTexture.Reset();
 	StagingTexture.Reset();
 	CachedWrappedResource.Reset();
+	CachedRTWrappedResource.Reset();
 	GammaTexture.Reset();
 	GammaRTV.Reset();
 
 	SharedHandle = nullptr;
 	CachedNativeResource = nullptr;
+	CachedRTNativeResource = nullptr;
 
 	if (Type == ESpoutType::Sender)
 	{
