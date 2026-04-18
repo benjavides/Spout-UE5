@@ -55,14 +55,17 @@ public:
 	// Global registry of sender/receiver shared state.
 	static FSpoutSenderRegistry& Get();
 
-	// Finds an existing entry or creates a new one for the given name.
+	// Finds an existing entry keyed by (Name, Type) or creates a new one.
+	// Keying on Type prevents a sender and receiver with the same FName from
+	// sharing (and corrupting) the same FSpoutSharedSender instance.
 	TSharedPtr<FSpoutSharedSender> FindOrAdd(const FName& Name, ESpoutType Type);
-	TSharedPtr<FSpoutSharedSender> Find(const FName& Name);
-	void Remove(const FName& Name);
+	TSharedPtr<FSpoutSharedSender> Find(const FName& Name, ESpoutType Type);
+	void Remove(const FName& Name, ESpoutType Type);
 	void Clear();
 
 private:
-	TMap<FName, TSharedPtr<FSpoutSharedSender>> Senders;
+	// Keyed by (Name, Type) so senders and receivers with the same FName coexist.
+	TMap<TPair<FName, ESpoutType>, TSharedPtr<FSpoutSharedSender>> Senders;
 	// Protects registry mutations across threads.
 	FCriticalSection Mutex;
 };

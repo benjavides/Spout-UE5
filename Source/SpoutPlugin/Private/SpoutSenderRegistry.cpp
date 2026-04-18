@@ -56,30 +56,32 @@ TSharedPtr<FSpoutSharedSender> FSpoutSenderRegistry::FindOrAdd(const FName& Name
 	// Registry access is shared across game/render threads.
 	FScopeLock Lock(&Mutex);
 
-	if (TSharedPtr<FSpoutSharedSender>* Existing = Senders.Find(Name))
+	const TPair<FName, ESpoutType> Key(Name, Type);
+	if (TSharedPtr<FSpoutSharedSender>* Existing = Senders.Find(Key))
 	{
 		return *Existing;
 	}
 
 	TSharedPtr<FSpoutSharedSender> NewSender = MakeShared<FSpoutSharedSender>(Name, Type);
-	Senders.Add(Name, NewSender);
+	Senders.Add(Key, NewSender);
 	return NewSender;
 }
 
-TSharedPtr<FSpoutSharedSender> FSpoutSenderRegistry::Find(const FName& Name)
+TSharedPtr<FSpoutSharedSender> FSpoutSenderRegistry::Find(const FName& Name, ESpoutType Type)
 {
 	FScopeLock Lock(&Mutex);
-	if (TSharedPtr<FSpoutSharedSender>* Existing = Senders.Find(Name))
+	const TPair<FName, ESpoutType> Key(Name, Type);
+	if (TSharedPtr<FSpoutSharedSender>* Existing = Senders.Find(Key))
 	{
 		return *Existing;
 	}
 	return nullptr;
 }
 
-void FSpoutSenderRegistry::Remove(const FName& Name)
+void FSpoutSenderRegistry::Remove(const FName& Name, ESpoutType Type)
 {
 	FScopeLock Lock(&Mutex);
-	Senders.Remove(Name);
+	Senders.Remove(TPair<FName, ESpoutType>(Name, Type));
 }
 
 void FSpoutSenderRegistry::Clear()

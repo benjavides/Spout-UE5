@@ -49,22 +49,26 @@ This plugin is intended to be built as part of a **project**, not as an engine p
 ## Supported Unreal Engine versions
 
 - **Tested and officially supported on Unreal Engine 5.5 and newer**
-- **Unreal Engine 5.1 to 5.4 are NOT officially supported**
+- **UE 5.3 and 5.4 — pre-built binaries available (see below)**
+- ~~**Unreal Engine 5.1 to 5.4 are NOT officially supported**~~
 
-⚠️ **Important note about UE 5.3 and 5.4**
+~~⚠️ **Important note about UE 5.3 and 5.4**~~
 
-Unreal Engine **5.3 and 5.4 currently fail to build this plugin when using an installed (non-source) engine** due to engine-level build environment restrictions and macro handling issues (notably around `__has_feature` and global build definitions).  
-This is a known Unreal Build Tool limitation and **not a runtime bug in the plugin itself**.
+~~Unreal Engine **5.3 and 5.4 currently fail to build this plugin when using an installed (non-source) engine** due to engine-level build environment restrictions and macro handling issues (notably around `__has_feature` and global build definitions).~~  
+~~This is a known Unreal Build Tool limitation and **not a runtime bug in the plugin itself**.~~
 
-At the moment, there is **no clean workaround** that:
-- works with an installed engine,
-- avoids modifying engine source,
-- and keeps the plugin distributable.
+~~At the moment, there is **no clean workaround** that:~~
+- ~~works with an installed engine,~~
+- ~~avoids modifying engine source,~~
+- ~~and keeps the plugin distributable.~~
 
-For this reason, **support starts from UE 5.5+ only**.
+~~For this reason, **support starts from UE 5.5+ only**.~~
 
-If you **know a workaround**, have a **clean fix**, or have successfully built this plugin on **UE 5.3 or 5.4 without engine source modifications**, please get in touch.  
-Contributions, insights, and tested solutions are very welcome.
+~~If you **know a workaround**, have a **clean fix**, or have successfully built this plugin on **UE 5.3 or 5.4 without engine source modifications**, please get in touch.~~  
+~~Contributions, insights, and tested solutions are very welcome.~~
+
+✅ **UE 5.3 and 5.4 have been successfully built.** Pre-compiled binaries are ready for download on Patreon:  
+👉 https://www.patreon.com/posts/spout-plugin-for-146572687
 
 ---
 
@@ -255,6 +259,13 @@ This project is released under the MIT License.
 While commercial use is allowed, redistributing this plugin as-is or with minimal changes and selling it as a standalone product goes against the spirit of this project.
 
 If you build something cool with this plugin and feel like sharing it, let me know. I would be happy to consider adding it to a future **Showcase** section.
+
+### Note on AI-assisted development
+
+Parts of this plugin were refined with the assistance of modern AI tools.  
+AI was used primarily as a development aid to help debug certain edge cases, accelerate some refactoring steps, and improve code clarity and documentation.
+
+The overall architecture, implementation, and the majority of the code were designed and written by the author, building on the original repository and hands-on development work. AI assistance was used in the same spirit as other developer tools: to help review, polish, and streamline parts of the process.
 
 
 ## License

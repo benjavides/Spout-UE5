@@ -263,16 +263,19 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 			D3D11_MAPPED_SUBRESOURCE Mapped;
 			if (SUCCEEDED(ImmediateContext->Map(StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &Mapped)))
 			{
-				// NOTE: This is a CPU readback + upload each frame; can be expensive for large textures.
-				// Use uint64 for size to avoid overflow at high resolutions (e.g. 8K * RGBA16F ~= 0.5 GB).
-				const uint64 DataSize = static_cast<uint64>(LocalHeight) * static_cast<uint64>(Mapped.RowPitch);
-				TArray<uint8> Data;
-				Data.SetNumUninitialized(static_cast<int64>(DataSize));
-				FMemory::Memcpy(Data.GetData(), Mapped.pData, DataSize);
-				ImmediateContext->Unmap(StagingTexture.Get(), 0);
+				// NOTE: This is still a CPU readback + upload each frame. The Variant-B
+				// optimization here is to hand Mapped.pData straight to RHIUpdateTexture2D
+				// and defer Unmap until both updates have executed, eliminating one full
+				// memcpy and one heap allocation per frame.
+				//
+				// Safety: FRHIComputeCommandList::UpdateTexture2D (non-bypass path) allocates
+				// command-list memory and memcpy's SourceData into it synchronously inside
+				// the call, before returning. The bypass path copies synchronously too.
+				// Either way, Mapped.pData only needs to stay valid until the two
+				// RHIUpdateTexture2D calls return, which is satisfied by the Unmap placement.
+				const uint8* const SourceData = static_cast<const uint8*>(Mapped.pData);
+				const FUpdateTextureRegion2D UpdateRegion(0, 0, 0, 0, LocalWidth, LocalHeight);
 
-				// Update the UE texture with the readback data.
-				FUpdateTextureRegion2D UpdateRegion(0, 0, 0, 0, LocalWidth, LocalHeight);
 				if (CapturedTextureRHI.IsValid())
 				{
 					RHIUpdateTexture2D(
@@ -280,7 +283,7 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 						0,
 						UpdateRegion,
 						Mapped.RowPitch,
-						Data.GetData()
+						SourceData
 					);
 				}
 
@@ -291,9 +294,11 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 						0,
 						UpdateRegion,
 						Mapped.RowPitch,
-						Data.GetData()
+						SourceData
 					);
 				}
+
+				ImmediateContext->Unmap(StagingTexture.Get(), 0);
 			}
 		});
 

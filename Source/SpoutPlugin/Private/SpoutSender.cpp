@@ -763,9 +763,11 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 
 void FSpoutSender::Close(FName SpoutName)
 {
-	if (FSpoutSenderRegistry::Get().Find(SpoutName))
+	// Registry is keyed by (Name, Type); Close must scope to the Sender entry only,
+	// leaving any Receiver entry with the same FName untouched.
+	if (FSpoutSenderRegistry::Get().Find(SpoutName, ESpoutType::Sender))
 	{
-		FSpoutSenderRegistry::Get().Remove(SpoutName);
+		FSpoutSenderRegistry::Get().Remove(SpoutName, ESpoutType::Sender);
 		UE_LOG(LogSpoutPlugin, Log, TEXT("Closed Spout Sender: %s"), *SpoutName.ToString());
 	}
 }
