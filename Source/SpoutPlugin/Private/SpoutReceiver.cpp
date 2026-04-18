@@ -108,6 +108,9 @@ namespace
 			Desc.Usage = D3D11_USAGE_STAGING;
 			Desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 			Desc.BindFlags = 0;
+			Desc.MiscFlags = 0;
+			Desc.SampleDesc.Count = 1;
+			Desc.SampleDesc.Quality = 0;
 
 			// Staging texture is owned by the receiver and recreated on size changes.
 			ComPtr<ID3D11Texture2D> NewStaging;
@@ -123,6 +126,33 @@ namespace
 
 		OutStaging = Receiver.StagingTexture;
 		return OutStaging != nullptr;
+	}
+
+	EPixelFormat DxgiFormatToPixelFormat(unsigned long DxgiFormat)
+	{
+		switch (static_cast<DXGI_FORMAT>(DxgiFormat))
+		{
+		case DXGI_FORMAT_B8G8R8A8_UNORM:
+		case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+		case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+			return PF_B8G8R8A8;
+
+		case DXGI_FORMAT_R8G8B8A8_UNORM:
+		case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+		case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+			return PF_R8G8B8A8;
+
+		case DXGI_FORMAT_R10G10B10A2_UNORM:
+		case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+			return PF_A2B10G10R10;
+
+		case DXGI_FORMAT_R16G16B16A16_FLOAT:
+		case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+			return PF_FloatRGBA;
+
+		default:
+			return PF_B8G8R8A8;
+		}
 	}
 }
 
@@ -147,7 +177,7 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 	{
 		return false;
 	}
-	static_cast<void>(Format);
+	const EPixelFormat PixelFormat = DxgiFormatToPixelFormat(Format);
 
 	TSharedPtr<FSpoutSharedSender> Receiver = FSpoutSenderRegistry::Get().FindOrAdd(SpoutName, ESpoutType::Receiver);
 	if (!Receiver)
@@ -161,13 +191,15 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 	}
 
 	// Create/resize the transient texture that UE will sample in materials.
-	SpoutTextureUtils::EnsureTransientTexture(OutTexture, static_cast<int32>(W), static_cast<int32>(H), PF_B8G8R8A8);
+	SpoutTextureUtils::EnsureTransientTexture(OutTexture, static_cast<int32>(W), static_cast<int32>(H), PixelFormat);
 
 	const FName ParamName = TextureParameterName.IsNone() ? FName("SpoutTexture") : TextureParameterName;
 
 	if (!OutMat && InputMaterial)
 	{
-		OutMat = UMaterialInstanceDynamic::Create(InputMaterial, nullptr);
+		// Use the transient package as outer so the MID has a valid owning UObject graph
+		// and is not at risk of being collected between creation and first sampling.
+		OutMat = UMaterialInstanceDynamic::Create(InputMaterial, GetTransientPackage());
 	}
 
 	if (OutMat)
@@ -178,7 +210,9 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 	TRefCountPtr<FRHITexture> CapturedTextureRHI;
 	if (OutTexture && OutTexture->GetResource())
 	{
-		CapturedTextureRHI = OutTexture->GetResource()->GetTexture2DRHI();
+		// GetTexture2DRHI() returns the legacy FRHITexture2D interface which is unified
+		// onto FRHITexture in UE5. GetTextureRHI() returns the current FTextureRHIRef.
+		CapturedTextureRHI = OutTexture->GetResource()->GetTextureRHI();
 	}
 
 	TRefCountPtr<FRHITexture> CapturedRenderTargetRHI;
@@ -230,9 +264,10 @@ bool FSpoutReceiver::Receive(const FName SpoutName, UMaterialInterface* InputMat
 			if (SUCCEEDED(ImmediateContext->Map(StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &Mapped)))
 			{
 				// NOTE: This is a CPU readback + upload each frame; can be expensive for large textures.
-				const uint32 DataSize = LocalHeight * Mapped.RowPitch;
+				// Use uint64 for size to avoid overflow at high resolutions (e.g. 8K * RGBA16F ~= 0.5 GB).
+				const uint64 DataSize = static_cast<uint64>(LocalHeight) * static_cast<uint64>(Mapped.RowPitch);
 				TArray<uint8> Data;
-				Data.SetNumUninitialized(DataSize);
+				Data.SetNumUninitialized(static_cast<int64>(DataSize));
 				FMemory::Memcpy(Data.GetData(), Mapped.pData, DataSize);
 				ImmediateContext->Unmap(StagingTexture.Get(), 0);
 

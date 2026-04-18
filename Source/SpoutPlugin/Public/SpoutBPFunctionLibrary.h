@@ -21,19 +21,6 @@ enum class ESpoutType : uint8
 };
 
 UENUM(BlueprintType)
-enum class ESpoutState : uint8
-{
-	// Sender exists in the registry and is registered with Spout.
-	ExistsRegistered,      // ER
-	// Sender exists in the registry but is not registered with Spout yet.
-	ExistsNotRegistered,   // EnoR
-	// Sender does not exist in the registry but is registered with Spout (external).
-	NotExistsRegistered,   // noER
-	// Sender does not exist in the registry and is not registered with Spout.
-	NotExistsNotRegistered // noEnoR
-};
-
-UENUM(BlueprintType)
 enum class ESpoutSendTextureFrom : uint8
 {
 	// Uses the active game viewport's backbuffer texture (render thread only).

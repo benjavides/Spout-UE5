@@ -55,14 +55,10 @@ namespace
 
 	struct FSpoutSendSource
 	{
-		// RHI texture to read from (render target path).
+		// RHI texture to read from; resolved on the game thread before enqueueing.
 		FTextureRHIRef SourceRHI;
-		// Render target resource when sending from a UTextureRenderTarget2D.
-		FTextureRenderTargetResource* RenderTargetResource = nullptr;
 		// Used to restore access state after copy.
 		bool bIsViewport = false;
-		// True if SourceRHI should be fetched from RenderTargetResource.
-		bool bUseRenderTarget = false;
 	};
 
 	bool BuildSendSource(ESpoutSendTextureFrom SendTextureFrom, UTextureRenderTarget2D* TextureRenderTarget2D, FSpoutSendSource& OutSource)
@@ -74,13 +70,21 @@ namespace
 				return false;
 			}
 
-			OutSource.RenderTargetResource = TextureRenderTarget2D->GameThread_GetRenderTargetResource();
-			if (!OutSource.RenderTargetResource)
+			FTextureRenderTargetResource* RTResource = TextureRenderTarget2D->GameThread_GetRenderTargetResource();
+			if (!RTResource)
 			{
 				return false;
 			}
 
-			OutSource.bUseRenderTarget = true;
+			// Resolve the RHI texture on the game thread where the UObject is guaranteed alive,
+			// so the render-thread lambda captures a ref-counted handle instead of a raw pointer.
+			OutSource.SourceRHI = RTResource->GetRenderTargetTexture();
+			if (!OutSource.SourceRHI.IsValid())
+			{
+				return false;
+			}
+
+			OutSource.bIsViewport = false;
 			return true;
 		}
 
@@ -455,7 +459,9 @@ bool EnsureGammaResources(FSpoutSharedSender& Sender, uint32 Width, uint32 Heigh
 		}
 
 		// Transition for copy and flush so the wrapped D3D11 context can see up-to-date data.
-		RHICmdList.Transition(FRHITransitionInfo(SourceRHI, ERHIAccess::Unknown, ERHIAccess::CopySrc));
+		// Viewport backbuffer comes in Present state; render targets come in SRVMask after scene render.
+		const ERHIAccess FromState = bIsViewport ? ERHIAccess::Present : ERHIAccess::SRVMask;
+		RHICmdList.Transition(FRHITransitionInfo(SourceRHI, FromState, ERHIAccess::CopySrc));
 		RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThreadFlushResources);
 
 		D3D12_RESOURCE_DESC Desc = NativeRes->GetDesc();
@@ -487,7 +493,6 @@ bool EnsureGammaResources(FSpoutSharedSender& Sender, uint32 Width, uint32 Heigh
 			if (Acquire.IsValid())
 			{
 				Context.GetImmediateContext()->CopyResource(SharedTexture.Get(), WrappedResource.Get());
-				Context.GetImmediateContext()->Flush();
 			}
 		}
 
@@ -745,22 +750,12 @@ bool FSpoutSender::Send(FName SpoutName, ESpoutSendTextureFrom SendTextureFrom, 
 	ENQUEUE_RENDER_COMMAND(SpoutSenderCmd)(
 		[SpoutName, SendSource](FRHICommandListImmediate& RHICmdList)
 		{
-			FTextureRHIRef LocalSourceRHI = SendSource.SourceRHI;
-			if (SendSource.bUseRenderTarget)
-			{
-				if (!SendSource.RenderTargetResource)
-				{
-					return;
-				}
-				LocalSourceRHI = SendSource.RenderTargetResource->GetRenderTargetTexture();
-			}
-
-			if (!LocalSourceRHI.IsValid())
+			if (!SendSource.SourceRHI.IsValid())
 			{
 				return;
 			}
 
-			SendTextureOnRenderThread(SpoutName, LocalSourceRHI, SendSource.bIsViewport, RHICmdList);
+			SendTextureOnRenderThread(SpoutName, SendSource.SourceRHI, SendSource.bIsViewport, RHICmdList);
 		});
 
 	return true;

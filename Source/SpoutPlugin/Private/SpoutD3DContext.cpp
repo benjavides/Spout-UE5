@@ -48,6 +48,10 @@ void FSpoutD3DContext::Initialize()
 	D3D_FEATURE_LEVEL FeatureLevels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
 
 	// Create a D3D11 device that wraps the engine's D3D12 device + graphics queue.
+	// D3D11On12CreateDevice expects IUnknown* const*; build a proper array rather than
+	// reinterpret-casting an ID3D12CommandQueue** (which violates strict aliasing).
+	IUnknown* const CommandQueues[] = { static_cast<IUnknown*>(D3D12Queue) };
+
 	Microsoft::WRL::ComPtr<ID3D11Device> LocalD3D11;
 	Microsoft::WRL::ComPtr<ID3D11DeviceContext> LocalContext;
 	HRESULT hr = D3D11On12CreateDevice(
@@ -55,7 +59,7 @@ void FSpoutD3DContext::Initialize()
 		DeviceFlags,
 		FeatureLevels,
 		2,
-		reinterpret_cast<IUnknown**>(&D3D12Queue),
+		CommandQueues,
 		1,
 		0,
 		LocalD3D11.GetAddressOf(),
@@ -107,6 +111,8 @@ void FSpoutD3DContext::Shutdown()
 bool FSpoutD3DContext::IsInitialized() const
 {
 #if PLATFORM_WINDOWS
+	// InitMutex also guards Shutdown(), so a concurrent teardown cannot race with this read.
+	FScopeLock Lock(&InitMutex);
 	return D3D11Device != nullptr;
 #else
 	return false;
@@ -116,6 +122,7 @@ bool FSpoutD3DContext::IsInitialized() const
 bool FSpoutD3DContext::IsSpoutAvailable() const
 {
 #if PLATFORM_WINDOWS
+	FScopeLock Lock(&InitMutex);
 	return D3D11Device && D3D11On12Device && SpoutSenderNames && SpoutDirectX;
 #else
 	return false;

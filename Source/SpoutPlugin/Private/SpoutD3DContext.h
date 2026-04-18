@@ -52,7 +52,8 @@ private:
 	void Initialize();
 
 	// Serializes initialization/shutdown across threads.
-	FCriticalSection InitMutex;
+	// Mutable so const accessors (IsInitialized/IsSpoutAvailable) can lock during reads.
+	mutable FCriticalSection InitMutex;
 	// Protects D3D11 immediate context use (not thread-safe).
 	FCriticalSection D3D11ContextMutex;
 	// Protects Spout global registry access.

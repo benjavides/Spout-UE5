@@ -23,13 +23,10 @@ namespace SpoutTextureUtils
 		}
 
 		// Ensure the render resource is released before GC.
-		if (Texture->GetResource())
+		// FTextureResource derives from FRenderResource, so no cast is required.
+		if (FTextureResource* Resource = Texture->GetResource())
 		{
-			FTextureResource* Resource = Texture->GetResource();
-			if (Resource)
-			{
-				BeginReleaseResource(static_cast<FRenderResource*>(Resource));
-			}
+			BeginReleaseResource(Resource);
 		}
 
 		Texture->MarkAsGarbage();
@@ -59,6 +56,8 @@ namespace SpoutTextureUtils
 	UTextureRenderTarget2D* CreateRenderTarget2D(int32 Width, int32 Height, EPixelFormat Format, bool bForceLinearGamma)
 	{
 		UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();
+		// Root the render target to prevent GC while in use by the plugin.
+		RenderTarget->AddToRoot();
 		// Create a render target for GPU-side writes before sharing via Spout.
 		RenderTarget->InitCustomFormat(Width, Height, Format, bForceLinearGamma);
 		RenderTarget->AddressX = TextureAddress::TA_Wrap;
