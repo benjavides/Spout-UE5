@@ -27,6 +27,10 @@
 #include "RenderResource.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/TextureRenderTarget.h"
+// UObject/Package.h is required for the full UPackage type so that
+// GetTransientPackage() (UPackage*) implicitly converts to UObject* in
+// non-Editor / non-unity builds where SharedPCH.UnrealEd doesn't apply.
+#include "UObject/Package.h"
 
 using Microsoft::WRL::ComPtr;
 
