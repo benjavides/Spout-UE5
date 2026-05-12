@@ -1,0 +1,14 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.SpoutMediaIO.cpp.obj": [
+			"SpoutMediaCapture.gen.cpp.obj",
+			"SpoutMediaIO.init.gen.cpp.obj",
+			"SpoutMediaOutput.gen.cpp.obj",
+			"PerModuleInline.gen.cpp.obj",
+			"SpoutMediaCapture.cpp.obj",
+			"SpoutMediaIOModule.cpp.obj",
+			"SpoutMediaOutput.cpp.obj"
+		]
+	}
+}

@@ -1,0 +1,43 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\source\\spoutmediaio\\private\\spoutmediaoutput.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\intermediate\\build\\win64\\x64\\fachada_miceditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.inclorderunreal5_3.h.pch",
+        "Includes": [
+            "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\spoutmediaio\\definitions.spoutmediaio.h",
+            "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\source\\spoutmediaio\\public\\spoutmediaoutput.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\media\\mediaioframework\\source\\mediaiocore\\public\\mediaoutput.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\media\\mediaioframework\\intermediate\\build\\win64\\unrealeditor\\inc\\mediaiocore\\uht\\mediaoutput.generated.h",
+            "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\intermediate\\build\\win64\\unrealeditor\\inc\\spoutmediaio\\uht\\spoutmediaoutput.generated.h",
+            "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\source\\spoutmediaio\\public\\spoutmediacapture.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\media\\mediaioframework\\source\\mediaiocore\\public\\mediacapture.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\core\\public\\containers\\spscqueue.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\compositing\\opencolorio\\source\\opencolorio\\public\\opencoloriocolorspace.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\compositing\\opencolorio\\intermediate\\build\\win64\\unrealeditor\\inc\\opencolorio\\uht\\opencoloriocolorspace.generated.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\compositing\\opencolorio\\source\\opencolorio\\public\\opencoloriorendering.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\media\\mediaioframework\\source\\mediaiocore\\public\\orderedasyncgate.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphutils.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphbuilder.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphblackboard.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\core\\public\\misc\\generatedtypename.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphevent.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphevent.inl",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphpass.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphparameter.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphresources.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rhi\\public\\rhitransientresourceallocator.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphresources.inl",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphparameters.inl",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphtrace.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphvalidation.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\core\\public\\experimental\\containers\\robinhoodhashtable.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\rendergraphbuilder.inl",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\source\\runtime\\rendercore\\public\\shaderparameterstruct.h",
+            "c:\\program files\\epic games\\ue_5.5\\engine\\plugins\\media\\mediaioframework\\intermediate\\build\\win64\\unrealeditor\\inc\\mediaiocore\\uht\\mediacapture.generated.h",
+            "d:\\1_projects\\mic\\pinta_tu\\unreal\\pinta_tu_mic\\plugins\\spout-ue5\\intermediate\\build\\win64\\unrealeditor\\inc\\spoutmediaio\\uht\\spoutmediacapture.generated.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

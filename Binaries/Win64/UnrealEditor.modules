@@ -1,0 +1,8 @@
+{
+	"BuildId": "37670630",
+	"Modules": 
+	{
+		"SpoutMediaIO": "UnrealEditor-SpoutMediaIO.dll",
+		"SpoutPlugin": "UnrealEditor-SpoutPlugin.dll"
+	}
+}

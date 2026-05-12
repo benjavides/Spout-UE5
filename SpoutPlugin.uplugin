@@ -12,9 +12,24 @@
 	"EnabledByDefault": true,
 	"IsBetaVersion": true,
 	"CanContainContent": true,
+	"Plugins": [
+		{
+			"Name": "MediaIOFramework",
+			"Enabled": true
+		},
+		{
+			"Name": "nDisplay",
+			"Enabled": true
+		}
+	],
 	"Modules": [
 		{
 			"Name": "SpoutPlugin",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "SpoutMediaIO",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}

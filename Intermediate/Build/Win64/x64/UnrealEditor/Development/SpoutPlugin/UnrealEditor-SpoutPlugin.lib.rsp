@@ -1,0 +1,12 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UnrealEditor-SpoutPlugin.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"D:\1_PROJECTS\MIC\pinta_tu\unreal\pinta_tu_mic\Intermediate\Build\Win64\x64\pinta_tu_micEditor\Development\UnrealEd\SharedPCH.UnrealEd.Project.ValApi.Cpp20.h.obj"
+"D:\1_PROJECTS\MIC\pinta_tu\unreal\pinta_tu_mic\Plugins\Spout-UE5\Intermediate\Build\Win64\x64\UnrealEditor\Development\SpoutPlugin\Module.SpoutPlugin.cpp.obj"
+"D:\1_PROJECTS\MIC\pinta_tu\unreal\pinta_tu_mic\Plugins\Spout-UE5\Intermediate\Build\Win64\x64\UnrealEditor\Development\SpoutPlugin\Default.rc2.res"
+/OUT:"D:\1_PROJECTS\MIC\pinta_tu\unreal\pinta_tu_mic\Plugins\Spout-UE5\Intermediate\Build\Win64\x64\UnrealEditor\Development\SpoutPlugin\UnrealEditor-SpoutPlugin.lib"

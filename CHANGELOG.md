@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.5 — 2026-05-12
+
+### Added
+- Add Spout MediaIO nDisplay output path.
+- Implemented a dedicated `SpoutMediaIO` module with custom media output/capture classes and a direct nDisplay render-hook fallback so viewport frames are sent reliably when `MediaCapture` callbacks are not dispatched.
+
 ## 0.0.4 — 2026-04-30
 
 ### Added

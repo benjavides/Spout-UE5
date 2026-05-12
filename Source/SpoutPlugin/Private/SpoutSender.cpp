@@ -776,3 +776,15 @@ void FSpoutSender::Shutdown()
 {
 	FSpoutViewportSender::Get().Shutdown();
 }
+
+void FSpoutSender::SendRHIOnRenderThread(FName SpoutName, const FTextureRHIRef& SourceRHI, FRHICommandListImmediate& RHICmdList, bool bIsViewport)
+{
+	SendTextureOnRenderThread(SpoutName, SourceRHI, bIsViewport, RHICmdList);
+}
+
+bool FSpoutSender::Initialize()
+{
+	FSpoutD3DContext& Context = FSpoutD3DContext::Get();
+	Context.InitializeIfNeeded();
+	return Context.IsSpoutAvailable();
+}

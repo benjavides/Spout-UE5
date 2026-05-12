@@ -1,0 +1,13 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\1_projects\\mic\\fachada\\unreal\\fachada_mic\\plugins\\spout-ue5\\intermediate\\build\\win64\\unrealeditor\\inc\\spoutmediaio\\uht\\spoutmediaio.init.gen.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\1_projects\\mic\\fachada\\unreal\\fachada_mic\\intermediate\\build\\win64\\x64\\fachada_miceditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.inclorderunreal5_3.h.pch",
+        "Includes": [
+            "d:\\1_projects\\mic\\fachada\\unreal\\fachada_mic\\plugins\\spout-ue5\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\spoutmediaio\\definitions.spoutmediaio.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

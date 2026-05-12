@@ -41,6 +41,7 @@ void FSpoutD3DContext::Initialize()
 
 	if (!D3D12Dev || !D3D12Queue)
 	{
+		UE_LOG(LogSpoutPlugin, Error, TEXT("SpoutD3DContext: D3D12 device or queue is null (Dev=%p Queue=%p)"), D3D12Dev, D3D12Queue);
 		return;
 	}
 
