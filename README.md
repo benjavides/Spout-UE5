@@ -1,31 +1,34 @@
-﻿[![Patreon](https://img.shields.io/badge/Patreon-Support%20this%20project-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/c/kesson_lab)
-
-# SpoutPlugin (UE5)
+﻿# SpoutPlugin (UE5)
 
 Windows-only Unreal Engine 5 plugin that sends and receives textures via Spout using a DX11-on-DX12 bridge.
 
 ## Introduction
 This plugin started from a real production need rather than as a polished, ready-made solution.
-While working with Unreal Engine 5, I noticed there were very few practical and up-to-date ways to integrate UE with other real-time tools such as TouchDesigner, especially when dealing with modern DX12 workflows.
+At the time this work began, there were very few practical and up-to-date ways to integrate Unreal Engine 5 with other real-time tools such as TouchDesigner, especially when dealing with modern DX12 workflows.
 
-So I decided to build my own solution. I strongly believe in the idea that sharing is caring, which is why I did not start entirely from scratch. Instead, I forked an existing open-source repository and focused on making it work again across multiple Unreal Engine 5 versions, adapting it to current engine constraints and workflows.
+This repository was built to address that gap. It was developed as a fork of an existing open-source repository and adapted to work across multiple Unreal Engine 5 versions and current engine constraints.
 
-Although I am comfortable working with C++, DirectX 11, and DirectX 12, this tool was developed primarily from the perspective of an artist and technical user rather than a traditional software engineer. The focus is therefore on solving real workflow problems and enabling practical integration, rather than building a perfectly abstracted or enterprise-grade system.
+This tool was developed primarily from the perspective of artist and technical-user workflows rather than traditional software product engineering. The focus is on solving practical integration needs rather than building a fully abstracted enterprise framework.
 
 The goal of this project is to provide a clear and debuggable bridge between Unreal Engine and Spout, without hiding complexity, especially when dealing with DX11-on-DX12 interop and GPU resource sharing.
 
-This plugin should not be considered fully production-ready. However, depending on your use case and with enough testing, it can be reliable enough. At least, it has been for my own projects.
+This plugin should not be considered fully production-ready. Depending on the use case and level of testing, it may still be reliable enough for real-world workflows.
 
-I also started developing this plugin with future integration into generative AI workflows in mind.
+The plugin was also developed with future integration into generative AI workflows in mind.
 
-Thanks to zuyi53, the original author of the repository this work is based on: [[link](https://github.com/zuyi53/Spout-UE5)].
-If you find bugs or issues, please report them.
-If you need a production-ready, paid solution with more features beyond Spout, consider the Off World Live plugin: [[link](https://offworld.live/)].
+## Fork note
+
+This repository is a personal fork of [zuyi53/Spout-UE5](https://github.com/zuyi53/Spout-UE5), published publicly in the same spirit of open sharing.
+
+It includes practical, AI-assisted changes made for specific workflows, with selective real-world validation rather than exhaustive testing across all scenarios.
+
+Out of respect for the original project, these changes were not submitted upstream because they were developed quickly for local needs, heavily AI-assisted, and not validated to the standard expected before opening a PR on another maintainer's repository.
 
 ## Features
 
 - **Spout Sender**
   - Send textures to external applications either from the **game viewport** or from a `UTextureRenderTarget2D`
+  - Send Spout output from **nDisplay** viewports
   - Automatic creation and update of the Spout sender stream
 
 - **Spout Receiver**
@@ -48,27 +51,7 @@ This plugin is intended to be built as part of a **project**, not as an engine p
 
 ## Supported Unreal Engine versions
 
-- **Tested and officially supported on Unreal Engine 5.5 and newer**
-- **UE 5.3 and 5.4 — pre-built binaries available (see below)**
-- ~~**Unreal Engine 5.1 to 5.4 are NOT officially supported**~~
-
-~~⚠️ **Important note about UE 5.3 and 5.4**~~
-
-~~Unreal Engine **5.3 and 5.4 currently fail to build this plugin when using an installed (non-source) engine** due to engine-level build environment restrictions and macro handling issues (notably around `__has_feature` and global build definitions).~~  
-~~This is a known Unreal Build Tool limitation and **not a runtime bug in the plugin itself**.~~
-
-~~At the moment, there is **no clean workaround** that:~~
-- ~~works with an installed engine,~~
-- ~~avoids modifying engine source,~~
-- ~~and keeps the plugin distributable.~~
-
-~~For this reason, **support starts from UE 5.5+ only**.~~
-
-~~If you **know a workaround**, have a **clean fix**, or have successfully built this plugin on **UE 5.3 or 5.4 without engine source modifications**, please get in touch.~~  
-~~Contributions, insights, and tested solutions are very welcome.~~
-
-✅ **UE 5.3 and 5.4 have been successfully built.** Pre-compiled binaries are ready for download on Patreon:  
-👉 https://www.patreon.com/posts/spout-plugin-for-146572687
+- **Tested on Unreal Engine 5.5**
 
 ---
 
@@ -97,12 +80,7 @@ The bundled `Spout.dll` will be staged automatically into your project’s `Bina
 
 ## Installation
 
-Pre-built versions of this plugin are distributed through Patreon **with free download**.
-
-👉 **Download access and updates are available here:**  
-https://www.patreon.com/posts/spout-plugin-for-146572687
-
-If you prefer building from source, clone this repository and follow the build steps above.
+Clone this repository and follow the build steps above.
 
 In some cases, you may also be able to drop the plugin into your project as-is.  
 When opening the project, Unreal may ask to rebuild the plugin because it was compiled with a different engine version. If that happens, click **Yes** and let Unreal rebuild it.
@@ -138,8 +116,7 @@ and **not** to `SceneColor (HDR) in RGB`.
 
 If `SceneColor (HDR)` is used, the texture sent through Spout may appear **black** on the receiving application.
 
-At the moment, this limitation is still under investigation. A proper fix or improvement will be added in a future update if possible.  
-If you have suggestions or insights on how to handle this correctly, contributions and advice are very welcome.
+At the moment, this limitation is still under investigation. A proper fix or improvement will be added in a future update if possible.
 
 Once the Capture Source is set correctly, the `Texture Target` of the `SceneCapture2D` can be safely used as the input Render Target for the Spout Sender.
 
@@ -257,8 +234,6 @@ This plugin ships with sample content under `Content/` when `CanContainContent` 
 This project is released under the MIT License.
 
 While commercial use is allowed, redistributing this plugin as-is or with minimal changes and selling it as a standalone product goes against the spirit of this project.
-
-If you build something cool with this plugin and feel like sharing it, let me know. I would be happy to consider adding it to a future **Showcase** section.
 
 ### Note on AI-assisted development
 
